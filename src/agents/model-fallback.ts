@@ -37,6 +37,14 @@ type FallbackAttempt = {
   code?: string;
 };
 
+type FallbackTransition = {
+  from: ModelCandidate;
+  to: ModelCandidate;
+  failure: Omit<FallbackAttempt, "provider" | "model"> & { skipped: boolean };
+  attempt: number;
+  total: number;
+};
+
 /**
  * Fallback abort check. Only treats explicit AbortError names as user aborts.
  * Message-based checks (e.g., "aborted") can mask timeouts and skip fallback.
@@ -271,6 +279,7 @@ export async function runWithModelFallback<T>(params: {
   fallbacksOverride?: string[];
   run: (provider: string, model: string) => Promise<T>;
   onError?: ModelFallbackErrorHandler;
+  onFallback?: (transition: FallbackTransition) => void | Promise<void>;
 }): Promise<ModelFallbackRunResult<T>> {
   const candidates = resolveFallbackCandidates({
     cfg: params.cfg,
@@ -319,6 +328,20 @@ export async function runWithModelFallback<T>(params: {
             error: `Provider ${candidate.provider} is in cooldown (all profiles unavailable)`,
             reason: "rate_limit",
           });
+          const next = candidates[i + 1];
+          if (next) {
+            await params.onFallback?.({
+              from: candidate,
+              to: next,
+              failure: {
+                error: `Provider ${candidate.provider} is in cooldown (all profiles unavailable)`,
+                reason: "rate_limit",
+                skipped: true,
+              },
+              attempt: i + 1,
+              total: candidates.length,
+            });
+          }
           continue;
         }
         // Primary model probe: attempt it despite cooldown to detect recovery.
@@ -373,6 +396,22 @@ export async function runWithModelFallback<T>(params: {
         attempt: i + 1,
         total: candidates.length,
       });
+      const next = candidates[i + 1];
+      if (next) {
+        await params.onFallback?.({
+          from: candidate,
+          to: next,
+          failure: {
+            error: described.message,
+            reason: described.reason,
+            status: described.status,
+            code: described.code,
+            skipped: false,
+          },
+          attempt: i + 1,
+          total: candidates.length,
+        });
+      }
     }
   }
 
