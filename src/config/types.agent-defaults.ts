@@ -158,6 +158,12 @@ export type AgentDefaultsConfig = {
   /** Human-like delay between block replies. */
   humanDelay?: HumanDelayConfig;
   timeoutSeconds?: number;
+  /**
+   * Abort a run if no agent streaming events are observed for this many seconds.
+   * This acts as a "time-to-first-token" and "stream idle" timeout backstop for
+   * providers that can hang without returning a proper rate limit / timeout error.
+   */
+  streamIdleTimeoutSeconds?: number;
   /** Max inbound media size in MB for agent-visible attachments (text note or future image attach). */
   mediaMaxMb?: number;
   typingIntervalSeconds?: number;

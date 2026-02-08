@@ -787,7 +787,7 @@ export async function runEmbeddedPiAgent(
                 resolveFailoverStatus(assistantFailoverReason ?? "unknown") ??
                 (isTimeoutErrorMessage(message) ? 408 : undefined);
               throw new FailoverError(message, {
-                reason: assistantFailoverReason ?? "unknown",
+                reason: timedOut ? "timeout" : (assistantFailoverReason ?? "unknown"),
                 provider,
                 model: modelId,
                 profileId: lastProfileId,

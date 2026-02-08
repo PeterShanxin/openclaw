@@ -12,6 +12,41 @@ export function resolveAgentTimeoutSeconds(cfg?: OpenClawConfig): number {
   return Math.max(seconds, 1);
 }
 
+export function resolveAgentStreamIdleTimeoutMs(opts: {
+  cfg?: OpenClawConfig;
+  overrideMs?: number | null;
+  overrideSeconds?: number | null;
+  minMs?: number;
+}): number {
+  const minMs = Math.max(normalizeNumber(opts.minMs) ?? 1, 1);
+  const rawDefaultSeconds = normalizeNumber(opts.cfg?.agents?.defaults?.streamIdleTimeoutSeconds);
+  const defaultMs = rawDefaultSeconds !== undefined && rawDefaultSeconds > 0 ? rawDefaultSeconds * 1000 : 0;
+  const overrideMs = normalizeNumber(opts.overrideMs);
+  if (overrideMs !== undefined) {
+    if (overrideMs === 0) {
+      return 0;
+    }
+    if (overrideMs < 0) {
+      return defaultMs;
+    }
+    return Math.max(overrideMs, minMs);
+  }
+  const overrideSeconds = normalizeNumber(opts.overrideSeconds);
+  if (overrideSeconds !== undefined) {
+    if (overrideSeconds === 0) {
+      return 0;
+    }
+    if (overrideSeconds < 0) {
+      return defaultMs;
+    }
+    return Math.max(overrideSeconds * 1000, minMs);
+  }
+  if (defaultMs <= 0) {
+    return 0;
+  }
+  return Math.max(defaultMs, minMs);
+}
+
 export function resolveAgentTimeoutMs(opts: {
   cfg?: OpenClawConfig;
   overrideMs?: number | null;
