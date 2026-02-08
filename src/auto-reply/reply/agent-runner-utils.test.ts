@@ -103,4 +103,21 @@ describe("buildThreadingToolContext", () => {
     expect(result.currentChannelId).toBe("C1");
     expect(result.currentThreadTs).toBe("123.456");
   });
+
+  it("does not treat Telegram ReplyToId as threadId", () => {
+    const sessionCtx = {
+      Provider: "telegram",
+      To: "telegram:5563081764",
+      ReplyToId: "1161",
+    } as TemplateContext;
+
+    const result = buildThreadingToolContext({
+      sessionCtx,
+      config: cfg,
+      hasRepliedRef: undefined,
+    });
+
+    expect(result.currentChannelId).toBe("telegram:5563081764");
+    expect(result.currentThreadTs).toBeUndefined();
+  });
 });
