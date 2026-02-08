@@ -60,6 +60,7 @@ import {
   acquireSessionWriteLock,
   resolveSessionLockMaxHoldFromTimeout,
 } from "../../session-write-lock.js";
+import { resolveAgentStreamIdleTimeoutMs } from "../../timeout.js";
 import { detectRuntimeShell } from "../../shell-utils.js";
 import {
   applySkillEnvOverrides,
@@ -702,6 +703,7 @@ export async function runEmbeddedAttempt(
         throw err;
       }
 
+      const isProbeSession = params.sessionId?.startsWith("probe-") ?? false;
       let aborted = Boolean(params.abortSignal?.aborted);
       let timedOut = false;
       let timedOutDuringCompaction = false;
@@ -754,6 +756,112 @@ export async function runEmbeddedAttempt(
         });
       };
 
+      // Streaming idle timeout: abort if we don't observe any agent stream events for too long.
+      // This provides a time-to-first-token backstop for providers that can hang without returning
+      // a proper error, while avoiding false positives during tool execution.
+      const streamIdleTimeoutMs = resolveAgentStreamIdleTimeoutMs({ cfg: params.config });
+      let streamIdleActive = streamIdleTimeoutMs > 0;
+      let streamIdleTimer: NodeJS.Timeout | undefined;
+      let streamIdlePaused = false;
+      const toolsInFlight = new Set<string>();
+      let compactionInFlight = false;
+
+      const clearStreamIdleTimer = () => {
+        if (!streamIdleTimer) {
+          return;
+        }
+        clearTimeout(streamIdleTimer);
+        streamIdleTimer = undefined;
+      };
+
+      const pauseStreamIdleTimer = () => {
+        if (!streamIdleActive || !streamIdleTimeoutMs || streamIdleTimeoutMs <= 0) {
+          return;
+        }
+        streamIdlePaused = true;
+        clearStreamIdleTimer();
+      };
+
+      const resetStreamIdleTimer = () => {
+        if (!streamIdleActive || !streamIdleTimeoutMs || streamIdleTimeoutMs <= 0) {
+          return;
+        }
+        if (streamIdlePaused) {
+          return;
+        }
+        if (runAbortController.signal.aborted) {
+          return;
+        }
+        clearStreamIdleTimer();
+        streamIdleTimer = setTimeout(() => {
+          if (streamIdlePaused || runAbortController.signal.aborted) {
+            return;
+          }
+          if (!isProbeSession) {
+            log.warn(
+              `embedded run stream idle timeout: runId=${params.runId} sessionId=${params.sessionId} idleTimeoutMs=${streamIdleTimeoutMs}`,
+            );
+          }
+          const err = new Error(`stream idle timeout after ${streamIdleTimeoutMs}ms`);
+          err.name = "TimeoutError";
+          abortRun(true, err);
+        }, streamIdleTimeoutMs);
+      };
+
+      const resumeStreamIdleTimer = () => {
+        if (!streamIdleActive || !streamIdleTimeoutMs || streamIdleTimeoutMs <= 0) {
+          return;
+        }
+        if (!streamIdlePaused) {
+          return;
+        }
+        streamIdlePaused = false;
+        resetStreamIdleTimer();
+      };
+
+      const onAssistantMessageStartWrapped = async () => {
+        // message_start is the earliest "first token soon" signal; treat it as activity.
+        resetStreamIdleTimer();
+        await params.onAssistantMessageStart?.();
+      };
+
+      const onAgentEventWrapped = (evt: { stream: string; data: Record<string, unknown> }) => {
+        if (streamIdleActive && !runAbortController.signal.aborted) {
+          if (evt?.stream === "tool") {
+            const phase = typeof evt.data?.phase === "string" ? evt.data.phase : "";
+            const toolCallId =
+              typeof evt.data?.toolCallId === "string" ? evt.data.toolCallId : "";
+            if (phase === "start" && toolCallId) {
+              toolsInFlight.add(toolCallId);
+              pauseStreamIdleTimer();
+            } else if (phase === "result" && toolCallId) {
+              toolsInFlight.delete(toolCallId);
+              if (toolsInFlight.size === 0 && !compactionInFlight) {
+                resumeStreamIdleTimer();
+              }
+            } else if (!streamIdlePaused) {
+              resetStreamIdleTimer();
+            }
+          } else if (evt?.stream === "compaction") {
+            const phase = typeof evt.data?.phase === "string" ? evt.data.phase : "";
+            if (phase === "start") {
+              compactionInFlight = true;
+              pauseStreamIdleTimer();
+            } else if (phase === "end") {
+              compactionInFlight = false;
+              if (toolsInFlight.size === 0) {
+                resumeStreamIdleTimer();
+              }
+            } else if (!streamIdlePaused) {
+              resetStreamIdleTimer();
+            }
+          } else if (!streamIdlePaused) {
+            resetStreamIdleTimer();
+          }
+        }
+        params.onAgentEvent?.(evt);
+      };
+
       const subscription = subscribeEmbeddedPiSession({
         session: activeSession,
         runId: params.runId,
@@ -771,8 +879,8 @@ export async function runEmbeddedAttempt(
         blockReplyBreak: params.blockReplyBreak,
         blockReplyChunking: params.blockReplyChunking,
         onPartialReply: params.onPartialReply,
-        onAssistantMessageStart: params.onAssistantMessageStart,
-        onAgentEvent: params.onAgentEvent,
+        onAssistantMessageStart: onAssistantMessageStartWrapped,
+        onAgentEvent: onAgentEventWrapped,
         enforceFinalTag: params.enforceFinalTag,
         config: params.config,
         sessionKey: params.sessionKey ?? params.sessionId,
@@ -804,7 +912,6 @@ export async function runEmbeddedAttempt(
       setActiveEmbeddedRun(params.sessionId, queueHandle, params.sessionKey);
 
       let abortWarnTimer: NodeJS.Timeout | undefined;
-      const isProbeSession = params.sessionId?.startsWith("probe-") ?? false;
       const abortTimer = setTimeout(
         () => {
           if (!isProbeSession) {
@@ -877,6 +984,7 @@ export async function runEmbeddedAttempt(
       let promptErrorSource: "prompt" | "compaction" | null = null;
       try {
         const promptStartedAt = Date.now();
+        resetStreamIdleTimer();
 
         // Run before_prompt_build hooks to allow plugins to inject prompt context.
         // Legacy compatibility: before_agent_start is also checked for context fields.
@@ -1051,6 +1159,8 @@ export async function runEmbeddedAttempt(
           promptError = err;
           promptErrorSource = "prompt";
         } finally {
+          streamIdleActive = false;
+          clearStreamIdleTimer();
           log.debug(
             `embedded run prompt end: runId=${params.runId} sessionId=${params.sessionId} durationMs=${Date.now() - promptStartedAt}`,
           );
