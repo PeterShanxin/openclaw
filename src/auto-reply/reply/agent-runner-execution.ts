@@ -37,6 +37,7 @@ import { buildThreadingToolContext, resolveEnforceFinalTag } from "./agent-runne
 import { createBlockReplyPayloadKey, type BlockReplyPipeline } from "./block-reply-pipeline.js";
 import { parseReplyDirectives } from "./reply-directives.js";
 import { applyReplyTagsToPayload, isRenderablePayload } from "./reply-payloads.js";
+import { isRoutableChannel, routeReply } from "./route-reply.js";
 
 export type AgentRunLoopResult =
   | {
@@ -97,6 +98,7 @@ export async function runAgentTurnWithFallback(params: {
   let fallbackProvider = params.followupRun.run.provider;
   let fallbackModel = params.followupRun.run.model;
   let didResetAfterCompactionFailure = false;
+  let fallbackNoticeCount = 0;
 
   while (true) {
     try {
@@ -154,6 +156,48 @@ export async function runAgentTurnWithFallback(params: {
           params.followupRun.run.config,
           resolveAgentIdFromSessionKey(params.followupRun.run.sessionKey),
         ),
+        onFallback: async (transition) => {
+          // User-facing fallback notices: Telegram DMs only; avoid spam and avoid heartbeats.
+          if (params.isHeartbeat || fallbackNoticeCount >= 3) {
+            return;
+          }
+          const channel = params.sessionCtx.OriginatingChannel;
+          const to = params.sessionCtx.OriginatingTo;
+          const chatType = params.sessionCtx.ChatType?.trim().toLowerCase();
+          if (!channel || !to || chatType !== "direct") {
+            return;
+          }
+          if (channel !== "telegram" || !isRoutableChannel(channel)) {
+            return;
+          }
+
+          const fromLabel = `${transition.from.provider}/${transition.from.model}`;
+          const toLabel = `${transition.to.provider}/${transition.to.model}`;
+          const reason = transition.failure.reason ?? "unknown";
+          const reasonLabel = reason === "rate_limit" ? "rate_limit/quota" : reason;
+          const skipped = transition.failure.skipped ? " (skipped: cooldown)" : "";
+          const notice = `⚠️ System notice: fallback ${transition.attempt}/${transition.total}: ${fromLabel} → ${toLabel} (${reasonLabel})${skipped}. Retrying...`;
+
+          try {
+            const res = await routeReply({
+              payload: { text: notice },
+              channel,
+              to,
+              sessionKey: params.sessionKey,
+              accountId: params.sessionCtx.AccountId,
+              threadId: params.sessionCtx.MessageThreadId ?? undefined,
+              cfg: params.followupRun.run.config,
+              mirror: false,
+            });
+            if (!res.ok) {
+              logVerbose(`fallback notice send failed: ${res.error ?? "unknown error"}`);
+              return;
+            }
+            fallbackNoticeCount += 1;
+          } catch (err) {
+            logVerbose(`fallback notice send failed: ${String(err)}`);
+          }
+        },
         run: (provider, model) => {
           // Notify that model selection is complete (including after fallback).
           // This allows responsePrefix template interpolation with the actual model.

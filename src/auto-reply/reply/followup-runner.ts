@@ -124,6 +124,7 @@ export function createFollowupRunner(params: {
       let runResult: Awaited<ReturnType<typeof runEmbeddedPiAgent>>;
       let fallbackProvider = queued.run.provider;
       let fallbackModel = queued.run.model;
+      let fallbackNoticeCount = 0;
       try {
         const fallbackResult = await runWithModelFallback({
           cfg: queued.run.config,
@@ -134,6 +135,48 @@ export function createFollowupRunner(params: {
             queued.run.config,
             resolveAgentIdFromSessionKey(queued.run.sessionKey),
           ),
+          onFallback: async (transition) => {
+            // User-facing fallback notices: Telegram DMs only; avoid spam.
+            if (fallbackNoticeCount >= 3) {
+              return;
+            }
+            const channel = queued.originatingChannel;
+            const to = queued.originatingTo;
+            const chatType = queued.originatingChatType?.trim().toLowerCase();
+            if (!channel || !to || chatType !== "direct") {
+              return;
+            }
+            if (channel !== "telegram" || !isRoutableChannel(channel)) {
+              return;
+            }
+
+            const fromLabel = `${transition.from.provider}/${transition.from.model}`;
+            const toLabel = `${transition.to.provider}/${transition.to.model}`;
+            const reason = transition.failure.reason ?? "unknown";
+            const reasonLabel = reason === "rate_limit" ? "rate_limit/quota" : reason;
+            const skipped = transition.failure.skipped ? " (skipped: cooldown)" : "";
+            const notice = `⚠️ System notice: fallback ${transition.attempt}/${transition.total}: ${fromLabel} → ${toLabel} (${reasonLabel})${skipped}. Retrying...`;
+
+            try {
+              const res = await routeReply({
+                payload: { text: notice },
+                channel,
+                to,
+                sessionKey: queued.run.sessionKey,
+                accountId: queued.originatingAccountId,
+                threadId: queued.originatingThreadId,
+                cfg: queued.run.config,
+                mirror: false,
+              });
+              if (!res.ok) {
+                logVerbose(`followup fallback notice send failed: ${res.error ?? "unknown error"}`);
+                return;
+              }
+              fallbackNoticeCount += 1;
+            } catch (err) {
+              logVerbose(`followup fallback notice send failed: ${String(err)}`);
+            }
+          },
           run: (provider, model) => {
             const authProfileId =
               provider === queued.run.provider ? queued.run.authProfileId : undefined;
