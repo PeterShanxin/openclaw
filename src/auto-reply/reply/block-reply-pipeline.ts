@@ -11,6 +11,7 @@ export type BlockReplyPipeline = {
   didStream: () => boolean;
   isAborted: () => boolean;
   hasSentPayload: (payload: ReplyPayload) => boolean;
+  hasEnqueuedPayload: (payload: ReplyPayload) => boolean;
 };
 
 export type BlockReplyBuffer = {
@@ -84,6 +85,8 @@ export function createBlockReplyPipeline(params: {
   const seenKeys = new Set<string>();
   const bufferedKeys = new Set<string>();
   const bufferedPayloadKeys = new Set<string>();
+  /** Persistent record of every individual payload key ever enqueued (never cleared). */
+  const allEnqueuedKeys = new Set<string>();
   const bufferedPayloads: ReplyPayload[] = [];
   let sendChain: Promise<void> = Promise.resolve();
   let aborted = false;
@@ -196,6 +199,7 @@ export function createBlockReplyPipeline(params: {
     if (aborted) {
       return;
     }
+    allEnqueuedKeys.add(createBlockReplyPayloadKey(payload));
     if (bufferPayload(payload)) {
       return;
     }
@@ -237,6 +241,10 @@ export function createBlockReplyPipeline(params: {
     hasSentPayload: (payload) => {
       const payloadKey = createBlockReplyPayloadKey(payload);
       return sentKeys.has(payloadKey);
+    },
+    hasEnqueuedPayload: (payload) => {
+      const payloadKey = createBlockReplyPayloadKey(payload);
+      return allEnqueuedKeys.has(payloadKey);
     },
   };
 }

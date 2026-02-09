@@ -103,10 +103,17 @@ export function buildReplyPayloads(params: {
     sentTexts: messagingToolSentTexts,
   });
   // Filter out payloads already sent via pipeline or directly during tool flush.
+  // When the pipeline aborted (e.g. delivery timeout), use hasEnqueuedPayload to suppress
+  // payloads that were enqueued but whose delivery ack was slow — these were likely delivered
+  // to the channel even though the pipeline considers them unconfirmed.
   const filteredPayloads = shouldDropFinalPayloads
     ? []
-    : params.blockStreamingEnabled
-      ? dedupedPayloads.filter((payload) => !params.blockReplyPipeline?.hasSentPayload(payload))
+    : params.blockStreamingEnabled && params.blockReplyPipeline
+      ? dedupedPayloads.filter((payload) =>
+          params.blockReplyPipeline!.isAborted()
+            ? !params.blockReplyPipeline!.hasEnqueuedPayload(payload)
+            : !params.blockReplyPipeline!.hasSentPayload(payload),
+        )
       : params.directlySentBlockKeys?.size
         ? dedupedPayloads.filter(
             (payload) => !params.directlySentBlockKeys!.has(createBlockReplyPayloadKey(payload)),

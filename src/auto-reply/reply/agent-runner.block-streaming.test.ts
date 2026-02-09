@@ -125,4 +125,97 @@ describe("runReplyAgent block streaming", () => {
     expect(onBlockReply.mock.calls[0][0].text).toBe("Hello");
     expect(result).toBeUndefined();
   });
+
+  it("suppresses duplicate final payloads when pipeline aborts due to delivery timeout", async () => {
+    // Simulate a slow Telegram delivery that triggers pipeline timeout.
+    // The block was enqueued (and likely delivered) but the ack was slow,
+    // so the pipeline aborts. Final payloads for the same text should be suppressed.
+    const onBlockReply = vi.fn().mockImplementation(
+      () => new Promise((resolve) => setTimeout(resolve, 5_000)),
+    );
+    runEmbeddedPiAgentMock.mockImplementationOnce(async (params) => {
+      const block = params.onBlockReply as ((payload: { text?: string }) => void) | undefined;
+      block?.({ text: "Progress update 1" });
+      block?.({ text: "Progress update 2" });
+      return {
+        payloads: [{ text: "Progress update 1" }, { text: "Progress update 2" }],
+        meta: {},
+      };
+    });
+
+    const typing = createMockTypingController();
+    const sessionCtx = {
+      Provider: "telegram",
+      OriginatingTo: "5563081764",
+      AccountId: "primary",
+      MessageSid: "msg",
+    } as unknown as TemplateContext;
+    const resolvedQueue = { mode: "interrupt" } as unknown as QueueSettings;
+    const followupRun = {
+      prompt: "hello",
+      summaryLine: "hello",
+      enqueuedAt: Date.now(),
+      run: {
+        sessionId: "session",
+        sessionKey: "main",
+        messageProvider: "telegram",
+        sessionFile: "/tmp/session.jsonl",
+        workspaceDir: "/tmp",
+        config: {
+          agents: {
+            defaults: {
+              blockStreamingCoalesce: {
+                minChars: 1,
+                maxChars: 200,
+                idleMs: 0,
+              },
+            },
+          },
+        },
+        skillsSnapshot: {},
+        provider: "anthropic",
+        model: "claude",
+        thinkLevel: "low",
+        verboseLevel: "off",
+        elevatedLevel: "off",
+        bashElevated: {
+          enabled: false,
+          allowed: false,
+          defaultLevel: "off",
+        },
+        timeoutMs: 1_000,
+        blockReplyBreak: "text_end",
+      },
+    } as unknown as FollowupRun;
+
+    const result = await runReplyAgent({
+      commandBody: "hello",
+      followupRun,
+      queueKey: "main",
+      resolvedQueue,
+      shouldSteer: false,
+      shouldFollowup: false,
+      isActive: false,
+      isStreaming: false,
+      opts: { onBlockReply, blockReplyTimeoutMs: 50 },
+      typing,
+      sessionCtx,
+      defaultModel: "anthropic/claude-opus-4-5",
+      resolvedVerboseLevel: "off",
+      isNewSession: false,
+      blockStreamingEnabled: true,
+      blockReplyChunking: {
+        minChars: 1,
+        maxChars: 200,
+        breakPreference: "paragraph",
+      },
+      resolvedBlockStreamingBreak: "text_end",
+      shouldInjectGroupIntro: false,
+      typingMode: "instant",
+    });
+
+    // The pipeline should have aborted due to the 50ms timeout.
+    // Despite the abort, final payloads matching enqueued block text should be suppressed.
+    expect(result).toBeUndefined();
+  });
 });
