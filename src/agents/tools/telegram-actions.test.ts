@@ -161,34 +161,34 @@ describe("handleTelegramAction", () => {
     const cfg = {
       channels: { telegram: { botToken: "tok", reactionLevel: "off" } },
     } as OpenClawConfig;
-    await expect(
-      handleTelegramAction(
-        {
-          action: "react",
-          chatId: "123",
-          messageId: "456",
-          emoji: "✅",
-        },
-        cfg,
-      ),
-    ).rejects.toThrow(/Telegram agent reactions disabled.*reactionLevel="off"/);
+    const result = await handleTelegramAction(
+      {
+        action: "react",
+        chatId: "123",
+        messageId: "456",
+        emoji: "✅",
+      },
+      cfg,
+    );
+    const text = (result.content as Array<{ type: string; text: string }>)[0].text;
+    expect(JSON.parse(text)).toMatchObject({ ok: false, reason: "disabled" });
   });
 
   it("blocks reactions when reactionLevel is ack", async () => {
     const cfg = {
       channels: { telegram: { botToken: "tok", reactionLevel: "ack" } },
     } as OpenClawConfig;
-    await expect(
-      handleTelegramAction(
-        {
-          action: "react",
-          chatId: "123",
-          messageId: "456",
-          emoji: "✅",
-        },
-        cfg,
-      ),
-    ).rejects.toThrow(/Telegram agent reactions disabled.*reactionLevel="ack"/);
+    const result = await handleTelegramAction(
+      {
+        action: "react",
+        chatId: "123",
+        messageId: "456",
+        emoji: "✅",
+      },
+      cfg,
+    );
+    const text = (result.content as Array<{ type: string; text: string }>)[0].text;
+    expect(JSON.parse(text)).toMatchObject({ ok: false, reason: "disabled" });
   });
 
   it("also respects legacy actions.reactions gating", async () => {
@@ -201,17 +201,17 @@ describe("handleTelegramAction", () => {
         },
       },
     } as OpenClawConfig;
-    await expect(
-      handleTelegramAction(
-        {
-          action: "react",
-          chatId: "123",
-          messageId: "456",
-          emoji: "✅",
-        },
-        cfg,
-      ),
-    ).rejects.toThrow(/Telegram reactions are disabled via actions.reactions/);
+    const result = await handleTelegramAction(
+      {
+        action: "react",
+        chatId: "123",
+        messageId: "456",
+        emoji: "✅",
+      },
+      cfg,
+    );
+    const text = (result.content as Array<{ type: string; text: string }>)[0].text;
+    expect(JSON.parse(text)).toMatchObject({ ok: false, reason: "disabled" });
   });
 
   it("sends a text message", async () => {
