@@ -103,6 +103,26 @@ describe("workspace path resolution", () => {
     });
   });
 
+  it("edits CRLF files when oldText/newText use LF newlines", async () => {
+    await withTempDir("openclaw-ws-", async (workspaceDir) => {
+      const testFile = "edit-crlf.txt";
+      await fs.writeFile(path.join(workspaceDir, testFile), "a\r\nb\r\nc\r\n", "utf8");
+
+      const tools = createOpenClawCodingTools({ workspaceDir });
+      const editTool = tools.find((tool) => tool.name === "edit");
+      expect(editTool).toBeDefined();
+
+      await editTool?.execute("ws-edit-crlf", {
+        path: testFile,
+        oldText: "a\nb",
+        newText: "a\nx",
+      });
+
+      const updated = await fs.readFile(path.join(workspaceDir, testFile), "utf8");
+      expect(updated).toBe("a\r\nx\r\nc\r\n");
+    });
+  });
+
   it("defaults exec cwd to workspaceDir when workdir is omitted", async () => {
     await withTempDir("openclaw-ws-", async (workspaceDir) => {
       const tools = createOpenClawCodingTools({ workspaceDir, exec: { host: "gateway" } });

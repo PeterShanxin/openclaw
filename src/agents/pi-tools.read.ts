@@ -1,4 +1,6 @@
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { createEditTool, createReadTool, createWriteTool } from "@mariozechner/pi-coding-agent";
 import type { AnyAgentTool } from "./pi-tools.types.js";
 import { detectMime } from "../media/mime.js";
@@ -251,6 +253,67 @@ export function wrapToolParamNormalization(
   };
 }
 
+function toCrlf(text: string): string {
+  // Convert LF and CRLF to CRLF without doubling CRs.
+  return text.replace(/\r?\n/g, "\r\n");
+}
+
+function toLf(text: string): string {
+  return text.replace(/\r\n/g, "\n");
+}
+
+function resolveAgainstRoot(root: string, filePath: string): string {
+  const trimmed = filePath.trim();
+  return path.isAbsolute(trimmed) ? trimmed : path.resolve(root, trimmed);
+}
+
+export function createOpenClawEditTool(root: string): AnyAgentTool {
+  const base = createEditTool(root) as unknown as AnyAgentTool;
+  const patched = patchToolSchemaForClaudeCompatibility(base);
+
+  return {
+    ...patched,
+    execute: async (toolCallId, params, signal, onUpdate) => {
+      const normalized = normalizeToolParams(params);
+      const record =
+        normalized ??
+        (params && typeof params === "object" ? (params as Record<string, unknown>) : undefined);
+
+      assertRequiredParams(record, CLAUDE_PARAM_GROUPS.edit, base.name);
+
+      const toolPath = String(record?.path ?? "");
+      let oldText = String(record?.oldText ?? "");
+      let newText = String(record?.newText ?? "");
+
+      try {
+        const absPath = resolveAgainstRoot(root, toolPath);
+        // The read tool can normalize newlines, while edit matches raw file bytes; tolerate CRLF/LF.
+        const fileText = await fs.readFile(absPath, "utf8");
+        const usesCrlf = fileText.includes("\r\n");
+        const usesLf = fileText.includes("\n");
+
+        if (usesCrlf) {
+          oldText = toCrlf(oldText);
+          newText = toCrlf(newText);
+        } else if (usesLf) {
+          oldText = toLf(oldText);
+          newText = toLf(newText);
+        }
+      } catch {
+        // If we can't read the file for newline detection, fall back to base behavior.
+      }
+
+      const forwarded = (normalized ?? params) as Record<string, unknown>;
+      return base.execute(
+        toolCallId,
+        { ...forwarded, path: toolPath, oldText, newText },
+        signal,
+        onUpdate,
+      );
+    },
+  };
+}
+
 function wrapSandboxPathGuard(tool: AnyAgentTool, root: string): AnyAgentTool {
   return {
     ...tool,
@@ -279,8 +342,7 @@ export function createSandboxedWriteTool(root: string) {
 }
 
 export function createSandboxedEditTool(root: string) {
-  const base = createEditTool(root) as unknown as AnyAgentTool;
-  return wrapSandboxPathGuard(wrapToolParamNormalization(base, CLAUDE_PARAM_GROUPS.edit), root);
+  return wrapSandboxPathGuard(createOpenClawEditTool(root), root);
 }
 
 export function createOpenClawReadTool(base: AnyAgentTool): AnyAgentTool {
