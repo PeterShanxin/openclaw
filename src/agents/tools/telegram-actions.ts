@@ -124,11 +124,14 @@ export async function handleTelegramAction(
         accountId: accountId ?? undefined,
       });
     } catch (err) {
+      const isInvalid = String(err).includes("REACTION_INVALID");
       return jsonResult({
         ok: false,
-        reason: String(err).includes("REACTION_INVALID") ? "REACTION_INVALID" : "error",
+        reason: isInvalid ? "REACTION_INVALID" : "error",
         emoji,
-        hint: "Reaction failed. Do not retry.",
+        hint: isInvalid
+          ? "This emoji is not supported for Telegram reactions. Add it to your reaction disallow list so you don't try it again."
+          : "Reaction failed. Do not retry.",
       });
     }
     if (!remove && !isEmpty) {
