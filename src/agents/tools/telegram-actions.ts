@@ -122,11 +122,26 @@ export async function handleTelegramAction(
         "Telegram bot token missing. Set TELEGRAM_BOT_TOKEN or channels.telegram.botToken.",
       );
     }
-    const reactionResult = await reactMessageTelegram(chatId ?? "", messageId ?? 0, emoji ?? "", {
-      token,
-      remove,
-      accountId: accountId ?? undefined,
-    });
+<<<<<<< HEAD
+    let reactionResult: Awaited<ReturnType<typeof reactMessageTelegram>>;
+    try {
+      reactionResult = await reactMessageTelegram(chatId ?? "", messageId ?? 0, emoji ?? "", {
+        token,
+        remove,
+        accountId: accountId ?? undefined,
+      });
+    } catch (err) {
+      // Return a soft result so model providers do not regenerate whole responses on invalid emoji.
+      if (String(err).includes("REACTION_INVALID")) {
+        return jsonResult({
+          ok: false,
+          reason: "REACTION_INVALID",
+          emoji,
+          hint: "This emoji is not supported for Telegram reactions. Do not retry.",
+        });
+      }
+      throw err;
+    }
     if (!reactionResult.ok) {
       return jsonResult({
         ok: false,
