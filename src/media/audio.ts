@@ -10,6 +10,7 @@ export const TELEGRAM_VOICE_AUDIO_EXTENSIONS = new Set([".oga", ".ogg", ".opus",
 export const TELEGRAM_VOICE_MIME_TYPES = new Set([
   "audio/ogg",
   "audio/opus",
+  "audio/webm",
   "audio/mpeg",
   "audio/mp3",
   "audio/mp4",
