@@ -9,7 +9,10 @@ export const handleBashCommand: CommandHandler = async (params, allowTextCommand
   const { command } = params;
   const bashSlashRequested =
     command.commandBodyNormalized === "/bash" || command.commandBodyNormalized.startsWith("/bash ");
-  const bashBangRequested = command.commandBodyNormalized.startsWith("!");
+  // Treat leading "!" as a bash alias only when bash commands are enabled.
+  // This avoids accidental interception of normal messages that start with "!" (e.g. "! hacked? ...").
+  const bashBangRequested =
+    params.cfg.commands?.bash === true && command.commandBodyNormalized.startsWith("!");
   if (!bashSlashRequested && !(bashBangRequested && command.isAuthorizedSender)) {
     return null;
   }

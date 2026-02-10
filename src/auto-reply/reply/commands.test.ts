@@ -90,6 +90,18 @@ describe("handleCommands gating", () => {
     expect(result.reply?.text).toContain("bash is disabled");
   });
 
+  it("does not treat leading ! as bash when disabled", async () => {
+    resetBashChatCommandForTests();
+    const cfg = {
+      commands: { bash: false, text: true },
+      whatsapp: { allowFrom: ["*"] },
+    } as OpenClawConfig;
+    const params = buildParams("! hacked? then if you do can you earn?", cfg);
+    const result = await handleCommands(params);
+    expect(result.shouldContinue).toBe(true);
+    expect(result.reply).toBeUndefined();
+  });
+
   it("blocks /bash when elevated is not allowlisted", async () => {
     resetBashChatCommandForTests();
     const cfg = {

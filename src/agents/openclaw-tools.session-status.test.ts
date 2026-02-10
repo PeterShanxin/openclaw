@@ -106,6 +106,30 @@ describe("session_status tool", () => {
     expect(details.statusText).not.toContain("OAuth/token status");
   });
 
+  it("treats sessionKey=current as the active session", async () => {
+    loadSessionStoreMock.mockReset();
+    updateSessionStoreMock.mockReset();
+    loadSessionStoreMock.mockReturnValue({
+      main: {
+        sessionId: "s1",
+        updatedAt: 10,
+      },
+    });
+
+    const tool = createOpenClawTools({ agentSessionKey: "main" }).find(
+      (candidate) => candidate.name === "session_status",
+    );
+    expect(tool).toBeDefined();
+    if (!tool) {
+      throw new Error("missing session_status tool");
+    }
+
+    const result = await tool.execute("callCurrent", { sessionKey: "current" });
+    const details = result.details as { ok?: boolean; sessionKey?: string };
+    expect(details.ok).toBe(true);
+    expect(details.sessionKey).toBe("main");
+  });
+
   it("errors for unknown session keys", async () => {
     loadSessionStoreMock.mockReset();
     updateSessionStoreMock.mockReset();

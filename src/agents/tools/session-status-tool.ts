@@ -265,7 +265,13 @@ export function createSessionStatusTool(opts?: {
       const a2aPolicy = createAgentToAgentPolicy(cfg);
 
       const requestedKeyParam = readStringParam(params, "sessionKey");
-      let requestedKeyRaw = requestedKeyParam ?? opts?.agentSessionKey;
+      const requestedKeyTrimmed = requestedKeyParam?.trim();
+      let requestedKeyRaw = requestedKeyTrimmed ?? opts?.agentSessionKey;
+      // Some models try to pass sessionKey="current" for the active session.
+      // Interpret that as "use the active session" rather than attempting sessionId resolution.
+      if (requestedKeyTrimmed?.toLowerCase() === "current") {
+        requestedKeyRaw = opts?.agentSessionKey ?? alias;
+      }
       if (!requestedKeyRaw?.trim()) {
         throw new Error("sessionKey required");
       }
