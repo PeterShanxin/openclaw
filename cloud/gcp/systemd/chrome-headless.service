@@ -1,0 +1,37 @@
+[Unit]
+Description=Headless Chromium (CDP) for OpenClaw Browser tool
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openclaw
+Group=openclaw
+EnvironmentFile=/etc/openclaw/moltbot.env
+WorkingDirectory=/var/lib/openclaw
+
+# Try common Chromium binary names.
+ExecStart=/usr/bin/env bash -lc '\
+  set -euo pipefail; \
+  CHROME=""; \
+  for c in chromium-browser chromium google-chrome google-chrome-stable; do \
+    if command -v "$c" >/dev/null 2>&1; then CHROME="$c"; break; fi; \
+  done; \
+  test -n "$CHROME"; \
+  exec "$CHROME" \
+    --headless=new \
+    --remote-debugging-address=127.0.0.1 \
+    --remote-debugging-port=9222 \
+    --user-data-dir=/var/lib/openclaw/chrome-profile \
+    --disable-gpu \
+    --disable-dev-shm-usage \
+    --no-first-run \
+    --no-default-browser-check \
+    about:blank'
+
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+

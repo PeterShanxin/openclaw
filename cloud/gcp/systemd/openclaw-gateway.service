@@ -1,0 +1,26 @@
+[Unit]
+Description=OpenClaw Gateway (MoltBot/Nova)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openclaw
+Group=openclaw
+WorkingDirectory=/opt/openclaw
+EnvironmentFile=/etc/openclaw/moltbot.env
+
+# Prefer explicit env-driven paths; config hot reload uses OPENCLAW_CONFIG_PATH.
+ExecStart=/usr/bin/env bash -lc '\
+  if [ -s /home/openclaw/.nvm/nvm.sh ]; then . /home/openclaw/.nvm/nvm.sh; fi; \
+  command -v node >/dev/null 2>&1 || exit 1; \
+  exec node dist/index.js gateway --port 18789 --bind loopback --verbose'
+
+Restart=always
+RestartSec=3
+
+# Slightly higher file limits helps with lots of sessions/media.
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

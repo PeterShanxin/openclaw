@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  openclaw-gateway:
+    image: openclaw:local
+    container_name: openclaw-gateway-1
+    restart: unless-stopped
+    ports:
+      - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${OPENCLAW_CONFIG_DIR:-./openclaw-config}:/home/node/.openclaw
+      - ${OPENCLAW_WORKSPACE_DIR:-./openclaw-workspace}:/home/node/.openclaw/workspace
+      - ./fix-ntfs-auth.sh:/home/node/fix-ntfs-auth.sh:ro
+    entrypoint: ["sh", "/home/node/fix-ntfs-auth.sh"]
+    environment:
+      - ZAI_API_KEY=${ZAI_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - BRAVE_API_KEY=${BRAVE_API_KEY}
+      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
+    env_file:
+      - .env
+    networks:
+      - openclaw-network
+
+networks:
+  openclaw-network:
+    driver: bridge

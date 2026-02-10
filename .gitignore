@@ -1,0 +1,49 @@
+# Environment variables with API keys and secrets
+.env
+
+# OpenClaw source (separate repo with its own git)
+OpenClaw/
+
+# OpenClaw workspace (MoltBot's brain - managed by the bot)
+openclaw-workspace/
+
+# OpenClaw config (contains bot tokens and API keys)
+openclaw-config/
+
+# Chrome browser profile data
+chrome-headless-profile/
+
+# Docker data
+# Note: gitignore patterns can't ignore absolute paths outside the repo (like `D:\DockerData\`).
+/docker-data/
+
+# Backup files
+*.tar.gz
+*.backup
+*.bak
+backups/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+.claude/settings.local.json
+
+# Scratch files
+nul
