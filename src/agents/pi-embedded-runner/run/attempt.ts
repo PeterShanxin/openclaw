@@ -940,7 +940,8 @@ export async function runEmbeddedAttempt(
         }
 
         try {
-          await waitForCompactionRetry();
+          // Compaction retries can hang; ensure we still tear down runs on abort/timeout.
+          await abortable(waitForCompactionRetry());
         } catch (err) {
           if (isRunnerAbortError(err)) {
             if (!promptError) {
