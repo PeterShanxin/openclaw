@@ -48,6 +48,7 @@ import {
   isCronSystemEvent,
   isExecCompletionEvent,
 } from "./heartbeat-events-filter.js";
+import { buildHeartbeatMainSessionContextBlock } from "./heartbeat-main-context.js";
 import { emitHeartbeatEvent, resolveIndicatorType } from "./heartbeat-events.js";
 import { resolveHeartbeatVisibility } from "./heartbeat-visibility.js";
 import {
@@ -274,7 +275,7 @@ function resolveHeartbeatSession(
   const mainEntry = store[mainSessionKey];
 
   if (scope === "global") {
-    return { sessionKey: mainSessionKey, storePath, store, entry: mainEntry };
+    return { sessionKey: mainSessionKey, storePath, store, entry: mainEntry, mainSessionKey, mainEntry };
   }
 
   const forced = forcedSessionKey?.trim();
@@ -304,12 +305,12 @@ function resolveHeartbeatSession(
 
   const trimmed = heartbeat?.session?.trim() ?? "";
   if (!trimmed) {
-    return { sessionKey: mainSessionKey, storePath, store, entry: mainEntry };
+    return { sessionKey: mainSessionKey, storePath, store, entry: mainEntry, mainSessionKey, mainEntry };
   }
 
   const normalized = trimmed.toLowerCase();
   if (normalized === "main" || normalized === "global") {
-    return { sessionKey: mainSessionKey, storePath, store, entry: mainEntry };
+    return { sessionKey: mainSessionKey, storePath, store, entry: mainEntry, mainSessionKey, mainEntry };
   }
 
   const candidate = toAgentStoreSessionKey({
@@ -330,11 +331,13 @@ function resolveHeartbeatSession(
         storePath,
         store,
         entry: store[canonical],
+        mainSessionKey,
+        mainEntry,
       };
     }
   }
 
-  return { sessionKey: mainSessionKey, storePath, store, entry: mainEntry };
+  return { sessionKey: mainSessionKey, storePath, store, entry: mainEntry, mainSessionKey, mainEntry };
 }
 
 function resolveHeartbeatReasoningPayloads(
@@ -534,7 +537,7 @@ export async function runHeartbeatOnce(opts: {
     // The LLM prompt says "if it exists" so this is expected behavior.
   }
 
-  const { entry, sessionKey, storePath } = resolveHeartbeatSession(
+  const { entry, sessionKey, storePath, mainSessionKey, mainEntry } = resolveHeartbeatSession(
     cfg,
     agentId,
     heartbeat,
@@ -590,11 +593,22 @@ export async function runHeartbeatOnce(opts: {
     .map((event) => event.text);
   const hasExecCompletion = pendingEvents.some(isExecCompletionEvent);
   const hasCronEvents = cronEvents.length > 0;
-  const prompt = hasExecCompletion
+  let prompt = hasExecCompletion
     ? EXEC_EVENT_PROMPT
     : hasCronEvents
       ? buildCronEventPrompt(cronEvents)
       : resolveHeartbeatPrompt(cfg, heartbeat);
+  if (sessionKey !== mainSessionKey && mainEntry?.sessionId) {
+    try {
+      const sessionFile = resolveSessionFilePath(mainEntry.sessionId, mainEntry, { agentId });
+      const contextBlock = await buildHeartbeatMainSessionContextBlock({ sessionFile });
+      if (contextBlock) {
+        prompt = `${prompt}\n\n${contextBlock}`;
+      }
+    } catch {
+      // Best-effort only. Heartbeats should still run even if transcript parsing fails.
+    }
+  }
   const ctx = {
     Body: appendCronStyleCurrentTimeLine(prompt, cfg, startedAt),
     From: sender,
