@@ -41,8 +41,8 @@ import { CommandLane } from "../process/lanes.js";
 import { normalizeAgentId, toAgentStoreSessionKey } from "../routing/session-key.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 import { formatErrorMessage } from "./errors.js";
-import { buildHeartbeatMainSessionContextBlock } from "./heartbeat-main-context.js";
 import { emitHeartbeatEvent, resolveIndicatorType } from "./heartbeat-events.js";
+import { buildHeartbeatMainSessionContext } from "./heartbeat-main-context.js";
 import { resolveHeartbeatVisibility } from "./heartbeat-visibility.js";
 import {
   type HeartbeatRunResult,
@@ -365,17 +365,38 @@ function resolveHeartbeatSession(
   const mainEntry = store[mainSessionKey];
 
   if (scope === "global") {
-    return { sessionKey: mainSessionKey, storePath, store, entry: mainEntry, mainSessionKey, mainEntry };
+    return {
+      sessionKey: mainSessionKey,
+      storePath,
+      store,
+      entry: mainEntry,
+      mainSessionKey,
+      mainEntry,
+    };
   }
 
   const trimmed = heartbeat?.session?.trim() ?? "";
   if (!trimmed) {
-    return { sessionKey: mainSessionKey, storePath, store, entry: mainEntry, mainSessionKey, mainEntry };
+    return {
+      sessionKey: mainSessionKey,
+      storePath,
+      store,
+      entry: mainEntry,
+      mainSessionKey,
+      mainEntry,
+    };
   }
 
   const normalized = trimmed.toLowerCase();
   if (normalized === "main" || normalized === "global") {
-    return { sessionKey: mainSessionKey, storePath, store, entry: mainEntry, mainSessionKey, mainEntry };
+    return {
+      sessionKey: mainSessionKey,
+      storePath,
+      store,
+      entry: mainEntry,
+      mainSessionKey,
+      mainEntry,
+    };
   }
 
   const candidate = toAgentStoreSessionKey({
@@ -402,7 +423,14 @@ function resolveHeartbeatSession(
     }
   }
 
-  return { sessionKey: mainSessionKey, storePath, store, entry: mainEntry, mainSessionKey, mainEntry };
+  return {
+    sessionKey: mainSessionKey,
+    storePath,
+    store,
+    entry: mainEntry,
+    mainSessionKey,
+    mainEntry,
+  };
 }
 
 function resolveHeartbeatReplyPayload(
@@ -599,9 +627,18 @@ export async function runHeartbeatOnce(opts: {
   if (sessionKey !== mainSessionKey && mainEntry?.sessionId) {
     try {
       const sessionFile = resolveSessionFilePath(mainEntry.sessionId, mainEntry, { agentId });
-      const contextBlock = await buildHeartbeatMainSessionContextBlock({ sessionFile });
-      if (contextBlock) {
-        prompt = `${prompt}\n\n${contextBlock}`;
+      const context = await buildHeartbeatMainSessionContext({ sessionFile });
+      if (context.diagnostics.trimmedTrailingMessages > 0) {
+        log.info("heartbeat: skipped main-session context due unresolved tail", {
+          sessionKey,
+          mainSessionKey,
+          trimmedTrailingMessages: context.diagnostics.trimmedTrailingMessages,
+          parsedMessages: context.diagnostics.parsedMessages,
+          includedMessages: context.diagnostics.includedMessages,
+        });
+      }
+      if (context.block && context.diagnostics.trimmedTrailingMessages === 0) {
+        prompt = `${prompt}\n\n${context.block}`;
       }
     } catch {
       // Best-effort only. Heartbeats should still run even if transcript parsing fails.

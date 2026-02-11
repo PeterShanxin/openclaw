@@ -138,6 +138,24 @@ export function injectHistoryImagesIntoMessages(
   return didMutate;
 }
 
+export function snapshotMessagesAfterToolResultFlush(params: {
+  sessionManager?: {
+    flushPendingToolResults?: () => void;
+    buildSessionContext?: () => { messages: AgentMessage[] };
+  };
+  activeSession: {
+    messages: AgentMessage[];
+    agent: { replaceMessages: (messages: AgentMessage[]) => void };
+  };
+}): AgentMessage[] {
+  params.sessionManager?.flushPendingToolResults?.();
+  const sessionContext = params.sessionManager?.buildSessionContext?.();
+  if (sessionContext?.messages?.length) {
+    params.activeSession.agent.replaceMessages(sessionContext.messages);
+  }
+  return params.activeSession.messages.slice();
+}
+
 export async function runEmbeddedAttempt(
   params: EmbeddedRunAttemptParams,
 ): Promise<EmbeddedRunAttemptResult> {
@@ -951,7 +969,10 @@ export async function runEmbeddedAttempt(
           }
         }
 
-        messagesSnapshot = activeSession.messages.slice();
+        messagesSnapshot = snapshotMessagesAfterToolResultFlush({
+          sessionManager,
+          activeSession,
+        });
         sessionIdUsed = activeSession.sessionId;
         cacheTrace?.recordStage("session:after", {
           messages: messagesSnapshot,
