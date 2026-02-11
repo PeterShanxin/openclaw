@@ -220,6 +220,24 @@ function summarizeSessionContext(messages: AgentMessage[]): {
   };
 }
 
+export function snapshotMessagesAfterToolResultFlush(params: {
+  sessionManager?: {
+    flushPendingToolResults?: () => void;
+    buildSessionContext?: () => { messages: AgentMessage[] };
+  };
+  activeSession: {
+    messages: AgentMessage[];
+    agent: { replaceMessages: (messages: AgentMessage[]) => void };
+  };
+}): AgentMessage[] {
+  params.sessionManager?.flushPendingToolResults?.();
+  const sessionContext = params.sessionManager?.buildSessionContext?.();
+  if (sessionContext?.messages?.length) {
+    params.activeSession.agent.replaceMessages(sessionContext.messages);
+  }
+  return params.activeSession.messages.slice();
+}
+
 export async function runEmbeddedAttempt(
   params: EmbeddedRunAttemptParams,
 ): Promise<EmbeddedRunAttemptResult> {
@@ -1234,7 +1252,10 @@ export async function runEmbeddedAttempt(
           timedOutDuringCompaction,
           preCompactionSnapshot,
           preCompactionSessionId,
-          currentSnapshot: activeSession.messages.slice(),
+          currentSnapshot: snapshotMessagesAfterToolResultFlush({
+            sessionManager,
+            activeSession,
+          }),
           currentSessionId: activeSession.sessionId,
         });
         if (timedOutDuringCompaction) {
