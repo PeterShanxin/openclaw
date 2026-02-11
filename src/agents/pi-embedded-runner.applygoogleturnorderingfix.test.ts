@@ -141,6 +141,24 @@ describe("applyGoogleTurnOrderingFix", () => {
     });
     expect(warn).toHaveBeenCalledTimes(1);
   });
+  it("treats google-vertex as a Google model API", () => {
+    const sessionManager = SessionManager.inMemory();
+    const warn = vi.fn();
+    const input = makeAssistantFirst();
+
+    const result = applyGoogleTurnOrderingFix({
+      messages: input,
+      modelApi: "google-vertex",
+      sessionManager,
+      sessionId: "session:vertex",
+      warn,
+    });
+
+    expect(result.messages[0]?.role).toBe("user");
+    expect(result.messages[1]?.role).toBe("assistant");
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
   it("skips non-Google models", () => {
     const sessionManager = SessionManager.inMemory();
     const warn = vi.fn();

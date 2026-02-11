@@ -13,6 +13,7 @@ import {
 } from "../pi-embedded-helpers.js";
 import { cleanToolSchemaForGemini } from "../pi-tools.schema.js";
 import {
+  normalizeAssistantToolCallBlockOrdering,
   sanitizeToolCallInputs,
   sanitizeToolUseResultPairing,
 } from "../session-transcript-repair.js";
@@ -350,9 +351,12 @@ export async function sanitizeSessionHistory(params: {
     ? sanitizeAntigravityThinkingBlocks(sanitizedImages)
     : sanitizedImages;
   const sanitizedToolCalls = sanitizeToolCallInputs(sanitizedThinking);
-  const repairedTools = policy.repairToolUseResultPairing
-    ? sanitizeToolUseResultPairing(sanitizedToolCalls)
+  const orderedToolCalls = policy.repairToolUseResultPairing
+    ? normalizeAssistantToolCallBlockOrdering(sanitizedToolCalls)
     : sanitizedToolCalls;
+  const repairedTools = policy.repairToolUseResultPairing
+    ? sanitizeToolUseResultPairing(orderedToolCalls)
+    : orderedToolCalls;
 
   const isOpenAIResponsesApi =
     params.modelApi === "openai-responses" || params.modelApi === "openai-codex-responses";

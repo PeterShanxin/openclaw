@@ -49,7 +49,6 @@ import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
 import { repairSessionFileIfNeeded } from "../../session-file-repair.js";
 import { guardSessionManager } from "../../session-tool-result-guard-wrapper.js";
 import { acquireSessionWriteLock } from "../../session-write-lock.js";
-import { resolveAgentStreamIdleTimeoutMs } from "../../timeout.js";
 import { detectRuntimeShell } from "../../shell-utils.js";
 import {
   applySkillEnvOverrides,
@@ -59,6 +58,7 @@ import {
 } from "../../skills.js";
 import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { buildSystemPromptReport } from "../../system-prompt-report.js";
+import { resolveAgentStreamIdleTimeoutMs } from "../../timeout.js";
 import { resolveTranscriptPolicy } from "../../transcript-policy.js";
 import { DEFAULT_BOOTSTRAP_FILENAME } from "../../workspace.js";
 import { isRunnerAbortError } from "../abort.js";
@@ -540,6 +540,22 @@ export async function runEmbeddedAttempt(
         );
       }
 
+      // Repair orphaned trailing user messages so new prompts don't violate role ordering.
+      const leafEntry = sessionManager.getLeafEntry();
+      if (leafEntry?.type === "message" && leafEntry.message.role === "user") {
+        if (leafEntry.parentId) {
+          sessionManager.branch(leafEntry.parentId);
+        } else {
+          sessionManager.resetLeaf();
+        }
+        const sessionContext = sessionManager.buildSessionContext();
+        activeSession.agent.replaceMessages(sessionContext.messages);
+        log.warn(
+          `Removed orphaned user message to prevent consecutive user turns. ` +
+            `runId=${params.runId} sessionId=${params.sessionId}`,
+        );
+      }
+
       try {
         const prior = await sanitizeSessionHistory({
           messages: activeSession.messages,
@@ -696,8 +712,7 @@ export async function runEmbeddedAttempt(
         if (streamIdleActive && !runAbortController.signal.aborted) {
           if (evt?.stream === "tool") {
             const phase = typeof evt.data?.phase === "string" ? evt.data.phase : "";
-            const toolCallId =
-              typeof evt.data?.toolCallId === "string" ? evt.data.toolCallId : "";
+            const toolCallId = typeof evt.data?.toolCallId === "string" ? evt.data.toolCallId : "";
             if (phase === "start" && toolCallId) {
               toolsInFlight.add(toolCallId);
               pauseStreamIdleTimer();
@@ -861,22 +876,6 @@ export async function runEmbeddedAttempt(
           prompt: effectivePrompt,
           messages: activeSession.messages,
         });
-
-        // Repair orphaned trailing user messages so new prompts don't violate role ordering.
-        const leafEntry = sessionManager.getLeafEntry();
-        if (leafEntry?.type === "message" && leafEntry.message.role === "user") {
-          if (leafEntry.parentId) {
-            sessionManager.branch(leafEntry.parentId);
-          } else {
-            sessionManager.resetLeaf();
-          }
-          const sessionContext = sessionManager.buildSessionContext();
-          activeSession.agent.replaceMessages(sessionContext.messages);
-          log.warn(
-            `Removed orphaned user message to prevent consecutive user turns. ` +
-              `runId=${params.runId} sessionId=${params.sessionId}`,
-          );
-        }
 
         try {
           // Detect and load images referenced in the prompt for vision-capable models.

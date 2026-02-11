@@ -1,10 +1,12 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import "./test-helpers/fast-coding-tools.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { ensureOpenClawModelsJson } from "./models-config.js";
+
+let lastStreamSimpleContext: unknown = undefined;
 
 vi.mock("@mariozechner/pi-ai", async () => {
   const actual = await vi.importActual<typeof import("@mariozechner/pi-ai")>("@mariozechner/pi-ai");
@@ -72,7 +74,9 @@ vi.mock("@mariozechner/pi-ai", async () => {
       }
       return buildAssistantMessage(model);
     },
-    streamSimple: (model: { api: string; provider: string; id: string }) => {
+    streamSimple: (...args: unknown[]) => {
+      const model = args[0] as { api: string; provider: string; id: string };
+      lastStreamSimpleContext = args[1];
       const stream = new actual.AssistantMessageEventStream();
       queueMicrotask(() => {
         stream.push({
@@ -173,6 +177,10 @@ const readSessionMessages = async (sessionFile: string) => {
 };
 
 describe("runEmbeddedPiAgent", () => {
+  beforeEach(() => {
+    lastStreamSimpleContext = undefined;
+  });
+
   it("writes models.json into the provided agentDir", async () => {
     const sessionFile = nextSessionFile();
 
@@ -534,5 +542,125 @@ describe("runEmbeddedPiAgent", () => {
 
     expect(result.meta.error).toBeUndefined();
     expect(result.payloads?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it("repairs orphaned tool calls before switching to strict providers", async () => {
+    const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+    const sessionFile = nextSessionFile();
+
+    const sessionManager = SessionManager.open(sessionFile);
+    sessionManager.appendMessage({
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "before tool call" },
+        {
+          type: "toolCall",
+          id: "call_orphan_1",
+          name: "read",
+          arguments: { path: "/tmp/orphan.txt" },
+        },
+        { type: "thinking", thinking: "after tool call" },
+      ],
+      stopReason: "toolUse",
+      api: "google-vertex",
+      provider: "google-vertex",
+      model: "gemini-test",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          total: 0,
+        },
+      },
+      timestamp: Date.now(),
+    });
+    sessionManager.appendMessage({
+      role: "user",
+      content: [{ type: "text", text: "orphaned user turn" }],
+    });
+
+    const cfg = {
+      models: {
+        providers: {
+          anthropic: {
+            api: "anthropic-messages",
+            apiKey: "sk-test",
+            baseUrl: "https://example.com",
+            models: [
+              {
+                id: "mock-claude",
+                name: "Mock Claude",
+                reasoning: false,
+                input: ["text"],
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                contextWindow: 16_000,
+                maxTokens: 2048,
+              },
+            ],
+          },
+        },
+      },
+    } satisfies OpenClawConfig;
+    await ensureModels(cfg);
+
+    await runEmbeddedPiAgent({
+      sessionId: "session:test",
+      sessionKey: testSessionKey,
+      sessionFile,
+      workspaceDir,
+      config: cfg,
+      prompt: "hello",
+      provider: "anthropic",
+      model: "mock-claude",
+      timeoutMs: 5_000,
+      agentDir,
+      enqueue: immediateEnqueue,
+    });
+
+    const ctx = lastStreamSimpleContext as { messages?: unknown } | undefined;
+    expect(Array.isArray(ctx?.messages)).toBe(true);
+
+    const messages = (ctx?.messages ?? []) as Array<{
+      role?: string;
+      content?: unknown;
+      toolCallId?: string;
+      toolUseId?: string;
+    }>;
+
+    const toolCallIndex = messages.findIndex((message) => {
+      if (message?.role !== "assistant" || !Array.isArray(message.content)) {
+        return false;
+      }
+      return message.content.some((block) => {
+        if (!block || typeof block !== "object") {
+          return false;
+        }
+        const rec = block as { type?: unknown; id?: unknown };
+        return rec.type === "toolCall" && rec.id === "call_orphan_1";
+      });
+    });
+
+    expect(toolCallIndex).toBeGreaterThanOrEqual(0);
+
+    const toolCallMessage = messages[toolCallIndex] as { content?: unknown } | undefined;
+    const blocks = (toolCallMessage?.content ?? []) as Array<{ type?: unknown; id?: unknown }>;
+    const lastBlock = blocks[blocks.length - 1];
+    expect(lastBlock?.type).toBe("toolCall");
+    expect(lastBlock?.id).toBe("call_orphan_1");
+
+    const next = messages[toolCallIndex + 1] as {
+      role?: string;
+      toolCallId?: string;
+      toolUseId?: string;
+    };
+    expect(next?.role).toBe("toolResult");
+    expect(next?.toolCallId ?? next?.toolUseId).toBe("call_orphan_1");
   });
 });

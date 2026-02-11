@@ -151,6 +151,68 @@ export function sanitizeToolCallInputs(messages: AgentMessage[]): AgentMessage[]
   return repairToolCallInputs(messages).messages;
 }
 
+/**
+ * Some strict tool providers (notably Anthropic) require tool_use blocks to be the
+ * final content blocks in an assistant message. Session transcripts (especially
+ * from other providers) can end up with text/thinking blocks after a tool call,
+ * which can make Anthropic reject the request even if tool results are present.
+ *
+ * Repair by moving tool call blocks to the end of each assistant message,
+ * preserving block order within the tool/non-tool partitions.
+ */
+export function normalizeAssistantToolCallBlockOrdering(messages: AgentMessage[]): AgentMessage[] {
+  let changed = false;
+  const out: AgentMessage[] = [];
+  type AssistantContentBlock = Extract<AgentMessage, { role: "assistant" }>["content"][number];
+
+  for (const msg of messages) {
+    if (!msg || typeof msg !== "object") {
+      out.push(msg);
+      continue;
+    }
+
+    if (msg.role !== "assistant" || !Array.isArray(msg.content) || msg.content.length < 2) {
+      out.push(msg);
+      continue;
+    }
+
+    let sawToolCall = false;
+    let hasTrailingNonTool = false;
+    for (const block of msg.content) {
+      if (isToolCallBlock(block)) {
+        sawToolCall = true;
+        continue;
+      }
+      if (sawToolCall) {
+        hasTrailingNonTool = true;
+        break;
+      }
+    }
+
+    if (!hasTrailingNonTool) {
+      out.push(msg);
+      continue;
+    }
+
+    const nonToolBlocks: AssistantContentBlock[] = [];
+    const toolBlocks: AssistantContentBlock[] = [];
+    // Wrap the type-guard helper so we don't affect TypeScript's narrowing of `block`.
+    const isTool = (block: AssistantContentBlock): boolean => isToolCallBlock(block);
+    for (const block of msg.content as AssistantContentBlock[]) {
+      if (isTool(block)) {
+        toolBlocks.push(block);
+      } else {
+        nonToolBlocks.push(block);
+      }
+    }
+
+    out.push({ ...msg, content: [...nonToolBlocks, ...toolBlocks] });
+    changed = true;
+  }
+
+  return changed ? out : messages;
+}
+
 export function sanitizeToolUseResultPairing(messages: AgentMessage[]): AgentMessage[] {
   return repairToolUseResultPairing(messages).messages;
 }
