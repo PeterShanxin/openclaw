@@ -113,13 +113,14 @@ describe("dispatchTelegramMessage draft streaming", () => {
 
   async function dispatchWithContext(params: {
     context: TelegramMessageContext;
+    cfg?: Parameters<typeof dispatchTelegramMessage>[0]["cfg"];
     telegramCfg?: Parameters<typeof dispatchTelegramMessage>[0]["telegramCfg"];
     streamMode?: Parameters<typeof dispatchTelegramMessage>[0]["streamMode"];
   }) {
     await dispatchTelegramMessage({
       context: params.context,
       bot: createBot(),
-      cfg: {},
+      cfg: params.cfg ?? {},
       runtime: createRuntime(),
       replyToMode: "first",
       streamMode: params.streamMode ?? "partial",
@@ -478,5 +479,65 @@ describe("dispatchTelegramMessage draft streaming", () => {
         replies: [expect.objectContaining({ text: expect.stringContaining("⚠️") })],
       }),
     );
+  });
+
+  it("coalesces tool updates into one message when streamMode is off", async () => {
+    dispatchReplyWithBufferedBlockDispatcher.mockImplementation(async ({ dispatcherOptions }) => {
+      await dispatcherOptions.deliver({ text: "🛠️ Exec: `ls`" }, { kind: "tool" });
+      await dispatcherOptions.deliver({ text: "🛠️ Exec: `ls`" }, { kind: "tool" });
+      await dispatcherOptions.deliver({ text: "📖 Read: `/tmp/file`" }, { kind: "tool" });
+      await dispatcherOptions.deliver({ text: "Final answer" }, { kind: "final" });
+      return { queuedFinal: true };
+    });
+    deliverReplies.mockResolvedValue({ delivered: true });
+
+    await dispatchWithContext({ context: createContext(), streamMode: "off" });
+
+    expect(deliverReplies).toHaveBeenCalledTimes(2);
+    const coalesced = deliverReplies.mock.calls[0]?.[0]?.replies?.[0]?.text ?? "";
+    expect(coalesced).toContain("🛠️ Exec: `ls`");
+    expect(coalesced).toContain("📖 Read: `/tmp/file`");
+    expect(coalesced.match(/🛠️ Exec: `ls`/g)?.length ?? 0).toBe(1);
+    expect(deliverReplies.mock.calls[1]?.[0]?.replies?.[0]?.text).toBe("Final answer");
+  });
+
+  it("suppresses all tool updates when agent silentTools is enabled", async () => {
+    dispatchReplyWithBufferedBlockDispatcher.mockImplementation(async ({ dispatcherOptions }) => {
+      await dispatcherOptions.deliver({ text: "🛠️ Exec: `ls`" }, { kind: "tool" });
+      await dispatcherOptions.deliver({ text: "📖 Read: `/tmp/file`" }, { kind: "tool" });
+      await dispatcherOptions.deliver({ text: "Final answer" }, { kind: "final" });
+      return { queuedFinal: true };
+    });
+    deliverReplies.mockResolvedValue({ delivered: true });
+
+    await dispatchWithContext({
+      context: createContext(),
+      streamMode: "off",
+      cfg: {
+        agents: {
+          list: [{ id: "default", silentTools: true }],
+        },
+      },
+    });
+
+    expect(deliverReplies).toHaveBeenCalledTimes(1);
+    expect(deliverReplies.mock.calls[0]?.[0]?.replies?.[0]?.text).toBe("Final answer");
+  });
+
+  it("keeps tool updates uncoalesced in partial mode", async () => {
+    dispatchReplyWithBufferedBlockDispatcher.mockImplementation(async ({ dispatcherOptions }) => {
+      await dispatcherOptions.deliver({ text: "🛠️ Exec: `ls`" }, { kind: "tool" });
+      await dispatcherOptions.deliver({ text: "📖 Read: `/tmp/file`" }, { kind: "tool" });
+      await dispatcherOptions.deliver({ text: "Final answer" }, { kind: "final" });
+      return { queuedFinal: true };
+    });
+    deliverReplies.mockResolvedValue({ delivered: true });
+
+    await dispatchWithContext({ context: createContext(), streamMode: "partial" });
+
+    expect(deliverReplies).toHaveBeenCalledTimes(3);
+    expect(deliverReplies.mock.calls[0]?.[0]?.replies?.[0]?.text).toBe("🛠️ Exec: `ls`");
+    expect(deliverReplies.mock.calls[1]?.[0]?.replies?.[0]?.text).toBe("📖 Read: `/tmp/file`");
+    expect(deliverReplies.mock.calls[2]?.[0]?.replies?.[0]?.text).toBe("Final answer");
   });
 });

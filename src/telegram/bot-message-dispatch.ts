@@ -1,5 +1,5 @@
 import type { Bot } from "grammy";
-import { resolveAgentDir } from "../agents/agent-scope.js";
+import { resolveAgentConfig, resolveAgentDir } from "../agents/agent-scope.js";
 import {
   findModelInCatalog,
   loadModelCatalog,
@@ -30,6 +30,65 @@ import { editMessageTelegram } from "./send.js";
 import { cacheSticker, describeStickerImage } from "./sticker-cache.js";
 
 const EMPTY_RESPONSE_FALLBACK = "No response generated. Please try again.";
+const TOOL_SUMMARY_MIN_CHARS = 240;
+const TOOL_SUMMARY_MAX_CHARS = 1800;
+
+type ToolSummaryBuffer = {
+  lines: string[];
+  seen: Set<string>;
+  charCount: number;
+  overflowCount: number;
+  limit: number;
+};
+
+function createToolSummaryBuffer(limit: number): ToolSummaryBuffer {
+  return {
+    lines: [],
+    seen: new Set<string>(),
+    charCount: 0,
+    overflowCount: 0,
+    limit,
+  };
+}
+
+function bufferToolSummary(state: ToolSummaryBuffer, text?: string) {
+  const normalized = text?.trim();
+  if (!normalized || state.seen.has(normalized)) {
+    return;
+  }
+  state.seen.add(normalized);
+  const separatorChars = state.lines.length > 0 ? 1 : 0;
+  const nextChars = state.charCount + separatorChars + normalized.length;
+  if (nextChars <= state.limit) {
+    state.lines.push(normalized);
+    state.charCount = nextChars;
+    return;
+  }
+  state.overflowCount += 1;
+}
+
+function buildToolSummaryText(state: ToolSummaryBuffer): string | undefined {
+  if (state.lines.length === 0) {
+    return undefined;
+  }
+  let text = state.lines.join("\n");
+  if (state.overflowCount <= 0) {
+    return text;
+  }
+  const suffix = `...and ${state.overflowCount} more updates.`;
+  if (text.length + 1 + suffix.length <= state.limit) {
+    return `${text}\n${suffix}`;
+  }
+  const available = Math.max(0, state.limit - suffix.length - 1);
+  if (available === 0) {
+    return suffix.slice(0, state.limit);
+  }
+  text = text.slice(0, available).trimEnd();
+  if (!text) {
+    return suffix.slice(0, state.limit);
+  }
+  return `${text}\n${suffix}`.slice(0, state.limit);
+}
 
 /** Minimum chars before sending first streaming message (improves push notification UX) */
 const DRAFT_MIN_INITIAL_CHARS = 30;
@@ -266,6 +325,11 @@ export const dispatchTelegramMessage = async ({
     ctxPayload.ReplyToIsQuote && ctxPayload.ReplyToBody
       ? ctxPayload.ReplyToBody.trim() || undefined
       : undefined;
+  const silentToolsEnabled = resolveAgentConfig(cfg, route.agentId)?.silentTools === true;
+  const toolSummaryBuffer = createToolSummaryBuffer(
+    Math.max(TOOL_SUMMARY_MIN_CHARS, Math.min(textLimit, TOOL_SUMMARY_MAX_CHARS)),
+  );
+  let toolSummaryFlushed = false;
   const deliveryState = {
     delivered: false,
     skippedNonSilent: 0,
@@ -290,6 +354,26 @@ export const dispatchTelegramMessage = async ({
     linkPreview: telegramCfg.linkPreview,
     replyQuoteText,
   };
+  const flushBufferedToolSummary = async () => {
+    if (toolSummaryFlushed) {
+      return;
+    }
+    toolSummaryFlushed = true;
+    if (silentToolsEnabled || streamMode !== "off") {
+      return;
+    }
+    const summaryText = buildToolSummaryText(toolSummaryBuffer);
+    if (!summaryText) {
+      return;
+    }
+    const result = await deliverReplies({
+      ...deliveryBaseOptions,
+      replies: [{ text: summaryText }],
+    });
+    if (result.delivered) {
+      deliveryState.delivered = true;
+    }
+  };
 
   let queuedFinal = false;
   try {
@@ -299,6 +383,15 @@ export const dispatchTelegramMessage = async ({
       dispatcherOptions: {
         ...prefixOptions,
         deliver: async (payload, info) => {
+          if (info.kind === "tool") {
+            if (silentToolsEnabled) {
+              return;
+            }
+            if (streamMode === "off") {
+              bufferToolSummary(toolSummaryBuffer, payload.text);
+              return;
+            }
+          }
           if (info.kind === "final") {
             await flushDraft();
             const hasMedia = Boolean(payload.mediaUrl) || (payload.mediaUrls?.length ?? 0) > 0;
@@ -389,6 +482,7 @@ export const dispatchTelegramMessage = async ({
                 );
               }
             }
+            await flushBufferedToolSummary();
           }
           const result = await deliverReplies({
             ...deliveryBaseOptions,
