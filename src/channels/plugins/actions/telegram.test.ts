@@ -163,4 +163,47 @@ describe("telegramMessageActions", () => {
     expect(String(call.messageId)).toBe("456");
     expect(call.emoji).toBe("ok");
   });
+
+  it("falls back to toolContext.currentMessageId for reactions", async () => {
+    handleTelegramAction.mockClear();
+    const cfg = { channels: { telegram: { botToken: "tok" } } } as OpenClawConfig;
+
+    await telegramMessageActions.handleAction({
+      action: "react",
+      params: {
+        channelId: 123,
+        emoji: "ok",
+      },
+      cfg,
+      accountId: undefined,
+      toolContext: {
+        currentMessageId: "789",
+      },
+    });
+
+    expect(handleTelegramAction).toHaveBeenCalledTimes(1);
+    const call = handleTelegramAction.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(call.action).toBe("react");
+    expect(String(call.chatId)).toBe("123");
+    expect(String(call.messageId)).toBe("789");
+    expect(call.emoji).toBe("ok");
+  });
+
+  it("requires messageId for reactions when no fallback is available", async () => {
+    handleTelegramAction.mockClear();
+    const cfg = { channels: { telegram: { botToken: "tok" } } } as OpenClawConfig;
+
+    await expect(
+      telegramMessageActions.handleAction({
+        action: "react",
+        params: {
+          channelId: 123,
+          emoji: "ok",
+        },
+        cfg,
+        accountId: undefined,
+      }),
+    ).rejects.toThrow(/messageId required/);
+    expect(handleTelegramAction).not.toHaveBeenCalled();
+  });
 });

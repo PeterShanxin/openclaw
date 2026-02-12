@@ -46,6 +46,34 @@ describe("message tool agent routing", () => {
     expect(call?.agentId).toBe("alpha");
     expect(call?.sessionKey).toBeUndefined();
   });
+
+  it("passes currentMessageId into toolContext for action fallbacks", async () => {
+    mocks.runMessageAction.mockClear();
+    mocks.runMessageAction.mockResolvedValue({
+      kind: "action",
+      action: "react",
+      channel: "telegram",
+      handledBy: "plugin",
+      payload: {},
+      dryRun: true,
+    } satisfies MessageActionRunResult);
+
+    const tool = createMessageTool({
+      agentSessionKey: "agent:alpha:main",
+      config: {} as never,
+      currentChannelProvider: "telegram",
+      currentMessageId: "7284",
+    });
+
+    await tool.execute("1", {
+      action: "react",
+      target: "telegram:123",
+      emoji: "ok",
+    });
+
+    const call = mocks.runMessageAction.mock.calls[0]?.[0];
+    expect(call?.toolContext?.currentMessageId).toBe("7284");
+  });
 });
 
 describe("message tool path passthrough", () => {

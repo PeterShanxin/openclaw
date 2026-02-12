@@ -72,11 +72,18 @@ function buildUserIdentitySection(ownerLine: string | undefined, isMinimal: bool
   return ["## User Identity", ownerLine, ""];
 }
 
-function buildTimeSection(params: { userTimezone?: string }) {
-  if (!params.userTimezone) {
+function buildTimeSection(params: { userTimezone?: string; userTime?: string }) {
+  const userTimezone = params.userTimezone?.trim();
+  const userTime = params.userTime?.trim();
+  if (!userTimezone && !userTime) {
     return [];
   }
-  return ["## Current Date & Time", `Time zone: ${params.userTimezone}`, ""];
+  return [
+    "## Current Date & Time",
+    ...(userTimezone ? [`Time zone: ${userTimezone}`] : []),
+    ...(userTime ? [`Current user time: ${userTime}`] : []),
+    "",
+  ];
 }
 
 function buildReplyTagsSection(isMinimal: boolean) {
@@ -333,6 +340,7 @@ export function buildAgentSystemPrompt(params: {
     : undefined;
   const reasoningLevel = params.reasoningLevel ?? "off";
   const userTimezone = params.userTimezone?.trim();
+  const userTime = params.userTime?.trim();
   const skillsPrompt = params.skillsPrompt?.trim();
   const heartbeatPrompt = params.heartbeatPrompt?.trim();
   const heartbeatPromptLine = heartbeatPrompt
@@ -449,6 +457,9 @@ export function buildAgentSystemPrompt(params: {
     userTimezone
       ? "If you need the current date, time, or day of week, run session_status (📊 session_status)."
       : "",
+    userTimezone
+      ? "Do not state an exact current clock time unless you've run session_status in this turn."
+      : "",
     "## Workspace",
     `Your working directory is: ${params.workspaceDir}`,
     "Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise.",
@@ -500,6 +511,7 @@ export function buildAgentSystemPrompt(params: {
     ...buildUserIdentitySection(ownerLine, isMinimal),
     ...buildTimeSection({
       userTimezone,
+      userTime,
     }),
     "## Workspace Files (injected)",
     "These user-editable files are loaded by OpenClaw and included below in Project Context.",

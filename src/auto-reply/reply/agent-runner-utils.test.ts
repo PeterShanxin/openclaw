@@ -11,6 +11,7 @@ describe("buildThreadingToolContext", () => {
       Provider: "whatsapp",
       From: "123@g.us",
       To: "+15550001",
+      MessageSid: "msg-123",
     } as TemplateContext;
 
     const result = buildThreadingToolContext({
@@ -20,6 +21,7 @@ describe("buildThreadingToolContext", () => {
     });
 
     expect(result.currentChannelId).toBe("123@g.us");
+    expect(result.currentMessageId).toBe("msg-123");
   });
 
   it("falls back to To for WhatsApp when From is missing", () => {
@@ -119,5 +121,22 @@ describe("buildThreadingToolContext", () => {
 
     expect(result.currentChannelId).toBe("telegram:5563081764");
     expect(result.currentThreadTs).toBeUndefined();
+  });
+
+  it("prefers MessageSidFull for current message id", () => {
+    const sessionCtx = {
+      Provider: "telegram",
+      To: "telegram:5563081764",
+      MessageSid: "1161",
+      MessageSidFull: "telegram:5563081764/1161",
+    } as TemplateContext;
+
+    const result = buildThreadingToolContext({
+      sessionCtx,
+      config: cfg,
+      hasRepliedRef: undefined,
+    });
+
+    expect(result.currentMessageId).toBe("telegram:5563081764/1161");
   });
 });
