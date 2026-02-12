@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=openclaw
 Group=openclaw
-WorkingDirectory=/opt/openclaw
+WorkingDirectory=/home/shanxinpeter/work/openclaw
 EnvironmentFile=/etc/openclaw/moltbot.env
 
 # Prefer explicit env-driven paths; config hot reload uses OPENCLAW_CONFIG_PATH.
