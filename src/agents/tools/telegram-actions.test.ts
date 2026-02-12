@@ -80,6 +80,27 @@ describe("handleTelegramAction", () => {
     );
   });
 
+  it("accepts snake_case message_id for reactions", async () => {
+    const cfg = {
+      channels: { telegram: { botToken: "tok", reactionLevel: "minimal" } },
+    } as OpenClawConfig;
+    await handleTelegramAction(
+      {
+        action: "react",
+        chatId: "123",
+        message_id: "456",
+        emoji: "✅",
+      },
+      cfg,
+    );
+    expect(reactMessageTelegram).toHaveBeenCalledWith(
+      "123",
+      456,
+      "✅",
+      expect.objectContaining({ token: "tok", remove: false }),
+    );
+  });
+
   it("removes reactions on empty emoji", async () => {
     const cfg = {
       channels: { telegram: { botToken: "tok", reactionLevel: "minimal" } },

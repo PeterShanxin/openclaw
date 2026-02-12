@@ -116,6 +116,7 @@ function buildSendSchema(options: { includeButtons: boolean; includeCards: boole
 function buildReactionSchema() {
   return {
     messageId: Type.Optional(Type.String()),
+    message_id: Type.Optional(Type.String()),
     emoji: Type.Optional(Type.String()),
     remove: Type.Optional(Type.Boolean()),
     targetAuthor: Type.Optional(Type.String()),
