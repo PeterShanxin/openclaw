@@ -52,18 +52,21 @@ Option B (system node via distro / nodesource) also works, but keep it ≥ 22.
 Create a dedicated user + directories:
 ```bash
 sudo useradd -m -s /bin/bash openclaw || true
-sudo mkdir -p /opt/openclaw /var/lib/openclaw
-sudo chown -R openclaw:openclaw /opt/openclaw /var/lib/openclaw
+sudo mkdir -p /opt/meowmoltbot /var/lib/openclaw
+sudo chown -R openclaw:openclaw /opt/meowmoltbot /var/lib/openclaw
 ```
 
-## 3) Build OpenClaw from your fork (run on the VM)
+Clone the ops repo (this repo) for templates + helper scripts:
+```bash
+sudo -iu openclaw git clone <YOUR_MEOWMOLTBOT_REPO_URL> /opt/meowmoltbot || true
+```
+
+## 3) Build OpenClaw from the merged monorepo (run on the VM)
 
 ```bash
 sudo -iu openclaw
-cd /opt/openclaw
+cd /opt/meowmoltbot/openclaw
 
-# Use YOUR fork/branch that contains the 2026-02-10 integration work
-git clone https://github.com/PeterShanxin/openclaw.git .
 git checkout main
 
 pnpm install
@@ -118,7 +121,18 @@ sudo chown -R openclaw:openclaw /var/lib/openclaw
 Your current config points the browser to a Docker Desktop host IP. On Linux, use localhost:
 
 ```bash
-node /opt/openclaw/scripts/cloud/patch-openclaw-json-for-linux.mjs /var/lib/openclaw/openclaw.json
+node /opt/meowmoltbot/scripts/cloud/patch-openclaw-json-for-linux.mjs /var/lib/openclaw/openclaw.json
+```
+
+### Optional compatibility symlink (recommended)
+
+Some older workspace scripts (or migrated config fragments) may still reference `/home/node/.openclaw/...`.
+If you see errors like `EACCES: permission denied, mkdir '/home/node'`, create a compatibility home:
+
+```bash
+sudo mkdir -p /home/node
+sudo ln -sfn /var/lib/openclaw /home/node/.openclaw
+sudo chmod 755 /home/node
 ```
 
 ## 8) Install Chromium + systemd services (run on the VM)
@@ -137,9 +151,9 @@ sudo snap install chromium
 Install service files:
 ```bash
 sudo mkdir -p /etc/openclaw
-sudo cp /opt/openclaw/cloud/gcp/systemd/openclaw-gateway.service /etc/systemd/system/openclaw-gateway.service
-sudo cp /opt/openclaw/cloud/gcp/systemd/chrome-headless.service /etc/systemd/system/chrome-headless.service
-sudo cp /opt/openclaw/cloud/gcp/moltbot.env.template /etc/openclaw/moltbot.env
+sudo cp /opt/meowmoltbot/cloud/gcp/systemd/openclaw-gateway.service /etc/systemd/system/openclaw-gateway.service
+sudo cp /opt/meowmoltbot/cloud/gcp/systemd/chrome-headless.service /etc/systemd/system/chrome-headless.service
+sudo cp /opt/meowmoltbot/cloud/gcp/moltbot.env.template /etc/openclaw/moltbot.env
 sudo chmod 600 /etc/openclaw/moltbot.env
 sudo nano /etc/openclaw/moltbot.env
 

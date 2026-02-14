@@ -1,3 +1,6 @@
+# Legacy Windows/Docker host compose file.
+#
+# Production is VM + systemd. Keep this only for rollback/history.
 version: '3.8'
 
 services:
