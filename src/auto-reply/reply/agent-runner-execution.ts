@@ -174,7 +174,12 @@ export async function runAgentTurnWithFallback(params: {
           const fromLabel = `${transition.from.provider}/${transition.from.model}`;
           const toLabel = `${transition.to.provider}/${transition.to.model}`;
           const reason = transition.failure.reason ?? "unknown";
-          const reasonLabel = reason === "rate_limit" ? "rate_limit/quota" : reason;
+          const reasonLabel =
+            reason === "rate_limit"
+              ? "rate_limit/quota"
+              : reason === "timeout"
+                ? "timeout(runtime_or_provider)"
+                : reason;
           const skipped = transition.failure.skipped ? " (skipped: cooldown)" : "";
           const notice = `⚠️ System notice: fallback ${transition.attempt}/${transition.total}: ${fromLabel} → ${toLabel} (${reasonLabel})${skipped}. Retrying...`;
 

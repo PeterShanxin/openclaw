@@ -93,9 +93,12 @@ export type EmbeddedRunAttemptParams = {
   enforceFinalTag?: boolean;
 };
 
+export type EmbeddedTimeoutOrigin = "run_budget" | "stream_idle" | "external_timeout";
+
 export type EmbeddedRunAttemptResult = {
   aborted: boolean;
   timedOut: boolean;
+  timeoutOrigin?: EmbeddedTimeoutOrigin;
   promptError: unknown;
   sessionIdUsed: string;
   systemPromptReport?: SessionSystemPromptReport;

@@ -248,6 +248,7 @@ export async function runEmbeddedPiAgent(
       const initialThinkLevel = params.thinkLevel ?? "off";
       let thinkLevel = initialThinkLevel;
       const attemptedThinking = new Set<ThinkLevel>();
+      let streamIdleRetryUsed = false;
       let apiKeyInfo: ApiKeyInfo | null = null;
       let lastProfileId: string | undefined;
 
@@ -342,6 +343,7 @@ export async function runEmbeddedPiAgent(
             profileIndex = nextIndex;
             thinkLevel = initialThinkLevel;
             attemptedThinking.clear();
+            streamIdleRetryUsed = false;
             return true;
           } catch (err) {
             if (candidate && candidate === lockedProfileId) {
@@ -454,7 +456,11 @@ export async function runEmbeddedPiAgent(
             enforceFinalTag: params.enforceFinalTag,
           });
 
-          const { aborted, promptError, timedOut, sessionIdUsed, lastAssistant } = attempt;
+          const { aborted, promptError, timedOut, timeoutOrigin, sessionIdUsed, lastAssistant } =
+            attempt;
+          if (!timedOut) {
+            streamIdleRetryUsed = false;
+          }
           mergeUsageIntoAccumulator(
             usageAccumulator,
             attempt.attemptUsage ?? normalizeUsage(lastAssistant?.usage as UsageLike),
@@ -715,6 +721,47 @@ export async function runEmbeddedPiAgent(
             continue;
           }
 
+          const runBudgetTimedOut = timedOut && timeoutOrigin === "run_budget";
+          const streamIdleTimedOut = timedOut && timeoutOrigin === "stream_idle";
+
+          if (runBudgetTimedOut) {
+            const message =
+              `Local runtime timeout reached after ${Math.max(1, params.timeoutMs)}ms. ` +
+              "This was a local run budget timeout, not a provider HTTP timeout. " +
+              "For long tasks, set `agents.defaults.timeoutSeconds` to 0 (unlimited).";
+            const usage = toNormalizedUsage(usageAccumulator);
+            return {
+              payloads: [
+                {
+                  text: message,
+                  isError: true,
+                },
+              ],
+              meta: {
+                durationMs: Date.now() - started,
+                agentMeta: {
+                  sessionId: sessionIdUsed,
+                  provider,
+                  model: model.id,
+                  usage,
+                  compactionCount: autoCompactionCount > 0 ? autoCompactionCount : undefined,
+                },
+                systemPromptReport: attempt.systemPromptReport,
+                error: { kind: "run_timeout", message },
+              },
+            };
+          }
+
+          if (streamIdleTimedOut && !streamIdleRetryUsed) {
+            streamIdleRetryUsed = true;
+            if (!isProbeSession) {
+              log.warn(
+                `stream idle timeout detected for ${provider}/${modelId}; retrying same model/profile once before fallback`,
+              );
+            }
+            continue;
+          }
+
           const authFailure = isAuthAssistantError(lastAssistant);
           const rateLimitFailure = isRateLimitAssistantError(lastAssistant);
           const billingFailure = isBillingAssistantError(lastAssistant);
@@ -761,8 +808,12 @@ export async function runEmbeddedPiAgent(
             );
           }
 
+          if (!streamIdleTimedOut) {
+            streamIdleRetryUsed = false;
+          }
+
           // Treat timeout as potential rate limit (Antigravity hangs on rate limit)
-          const shouldRotate = (!aborted && failoverFailure) || timedOut;
+          const shouldRotate = (!aborted && failoverFailure) || streamIdleTimedOut;
 
           if (shouldRotate) {
             if (lastProfileId) {

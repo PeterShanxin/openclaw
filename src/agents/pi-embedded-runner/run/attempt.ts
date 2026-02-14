@@ -4,7 +4,11 @@ import { streamSimple } from "@mariozechner/pi-ai";
 import { createAgentSession, SessionManager, SettingsManager } from "@mariozechner/pi-coding-agent";
 import fs from "node:fs/promises";
 import os from "node:os";
-import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
+import type {
+  EmbeddedRunAttemptParams,
+  EmbeddedRunAttemptResult,
+  EmbeddedTimeoutOrigin,
+} from "./types.js";
 import { resolveHeartbeatPrompt } from "../../../auto-reply/heartbeat.js";
 import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
@@ -609,6 +613,7 @@ export async function runEmbeddedAttempt(
       const isProbeSession = params.sessionId?.startsWith("probe-") ?? false;
       let aborted = Boolean(params.abortSignal?.aborted);
       let timedOut = false;
+      let timeoutOrigin: EmbeddedTimeoutOrigin | undefined;
       const getAbortReason = (signal: AbortSignal): unknown =>
         "reason" in signal ? (signal as { reason?: unknown }).reason : undefined;
       const makeTimeoutAbortReason = (): Error => {
@@ -622,10 +627,11 @@ export async function runEmbeddedAttempt(
         err.name = "AbortError";
         return err;
       };
-      const abortRun = (isTimeout = false, reason?: unknown) => {
+      const abortRun = (isTimeout = false, reason?: unknown, origin?: EmbeddedTimeoutOrigin) => {
         aborted = true;
         if (isTimeout) {
           timedOut = true;
+          timeoutOrigin = timeoutOrigin ?? origin ?? "external_timeout";
         }
         if (isTimeout) {
           runAbortController.abort(reason ?? makeTimeoutAbortReason());
@@ -706,7 +712,7 @@ export async function runEmbeddedAttempt(
           }
           const err = new Error(`stream idle timeout after ${streamIdleTimeoutMs}ms`);
           err.name = "TimeoutError";
-          abortRun(true, err);
+          abortRun(true, err, "stream_idle");
         }, streamIdleTimeoutMs);
       };
 
@@ -814,7 +820,7 @@ export async function runEmbeddedAttempt(
               `embedded run timeout: runId=${params.runId} sessionId=${params.sessionId} timeoutMs=${params.timeoutMs}`,
             );
           }
-          abortRun(true);
+          abortRun(true, undefined, "run_budget");
           if (!abortWarnTimer) {
             abortWarnTimer = setTimeout(() => {
               if (!activeSession.isStreaming) {
@@ -836,7 +842,7 @@ export async function runEmbeddedAttempt(
       const onAbort = () => {
         const reason = params.abortSignal ? getAbortReason(params.abortSignal) : undefined;
         const timeout = reason ? isTimeoutError(reason) : false;
-        abortRun(timeout, reason);
+        abortRun(timeout, reason, timeout ? "external_timeout" : undefined);
       };
       if (params.abortSignal) {
         if (params.abortSignal.aborted) {
@@ -1028,6 +1034,7 @@ export async function runEmbeddedAttempt(
       return {
         aborted,
         timedOut,
+        timeoutOrigin,
         promptError,
         sessionIdUsed,
         systemPromptReport,

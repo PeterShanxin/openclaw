@@ -1,10 +1,26 @@
 import { describe, expect, it } from "vitest";
+import type { OpenClawConfig } from "../config/config.js";
 import { resolveAgentTimeoutMs } from "./timeout.js";
 
 describe("resolveAgentTimeoutMs", () => {
+  it("defaults to no hard timeout", () => {
+    expect(resolveAgentTimeoutMs({})).toBe(2_147_000_000);
+  });
+
   it("uses a timer-safe sentinel for no-timeout overrides", () => {
     expect(resolveAgentTimeoutMs({ overrideSeconds: 0 })).toBe(2_147_000_000);
     expect(resolveAgentTimeoutMs({ overrideMs: 0 })).toBe(2_147_000_000);
+  });
+
+  it("treats config timeoutSeconds=0 as no hard timeout", () => {
+    const cfg = {
+      agents: {
+        defaults: {
+          timeoutSeconds: 0,
+        },
+      },
+    } satisfies OpenClawConfig;
+    expect(resolveAgentTimeoutMs({ cfg })).toBe(2_147_000_000);
   });
 
   it("clamps very large timeout overrides to timer-safe values", () => {

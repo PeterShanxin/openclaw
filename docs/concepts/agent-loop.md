@@ -136,7 +136,8 @@ See [Plugins](/tools/plugin#plugin-hooks) for the hook API and registration deta
 ## Timeouts
 
 - `agent.wait` default: 30s (just the wait). `timeoutMs` param overrides.
-- Agent runtime: `agents.defaults.timeoutSeconds` default 600s; enforced in `runEmbeddedPiAgent` abort timer.
+- Agent runtime hard timeout: `agents.defaults.timeoutSeconds` default is `0` (no hard timeout).
+- Stream idle timeout: `agents.defaults.streamIdleTimeoutSeconds` aborts runs with no stream activity.
 
 ## Where things can end early
 
