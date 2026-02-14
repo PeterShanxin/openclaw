@@ -6,7 +6,7 @@ This repository contains the ops docs and deployment templates. Runtime state an
 
 ## Production Layout (VM)
 
-- OpenClaw source/build: `/opt/openclaw`
+- OpenClaw source/build: `/opt/meowmoltbot/openclaw`
 - State dir (credentials/sessions/cron/media/etc): `/var/lib/openclaw`
 - Workspace dir (SOUL/IDENTITY/HEARTBEAT/memory/skills): `/var/lib/openclaw/workspace`
 - Chromium profile: `/var/lib/openclaw/chrome-profile`

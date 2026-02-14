@@ -4,7 +4,7 @@ This repo is an ops/documentation repo for Nova's production deployment on a GCP
 
 ## Production Layout
 
-- OpenClaw build: `/opt/openclaw`
+- OpenClaw build: `/opt/meowmoltbot/openclaw`
 - State dir: `/var/lib/openclaw`
   - Config: `/var/lib/openclaw/openclaw.json`
   - Media (screenshots): `/var/lib/openclaw/media/browser`

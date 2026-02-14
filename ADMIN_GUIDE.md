@@ -23,7 +23,7 @@ curl -fsS http://127.0.0.1:9222/json/version | jq .
 
 ## Key Paths (Production)
 
-- `/opt/openclaw`: OpenClaw build
+- `/opt/meowmoltbot/openclaw`: OpenClaw build
 - `/var/lib/openclaw`: state dir
 - `/var/lib/openclaw/workspace`: Nova workspace (SOUL/IDENTITY/HEARTBEAT/memory/skills)
 - `/var/lib/openclaw/chrome-profile`: Chromium profile

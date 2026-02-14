@@ -59,7 +59,7 @@ sudo systemctl restart openclaw-gateway.service
 ## Key Paths
 
 - `/opt/meowmoltbot`: ops docs/templates/scripts
-- `/opt/openclaw`: OpenClaw build
+- `/opt/meowmoltbot/openclaw`: OpenClaw build
 - `/var/lib/openclaw`: state dir (includes `openclaw.json`, media, credentials)
 - `/var/lib/openclaw/workspace`: Nova workspace
 - `/var/lib/openclaw/chrome-profile`: Chromium profile

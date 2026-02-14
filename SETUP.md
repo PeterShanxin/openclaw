@@ -14,7 +14,7 @@ sudo apt-get install -y git ca-certificates curl jq build-essential
 
 2. Install Node.js >= 22 and pnpm (via Corepack).
 
-3. Build OpenClaw into `/opt/openclaw` from `PeterShanxin/openclaw` (branch `main`).
+3. Build OpenClaw from the merged monorepo path `/opt/meowmoltbot/openclaw`.
 
 4. Restore runtime data to:
 - `/var/lib/openclaw/`
@@ -42,4 +42,3 @@ curl -fsS http://127.0.0.1:9222/json/version | jq .
 ## Legacy (Windows + Docker)
 
 Older Docker Desktop setup instructions have been deprecated in favor of VM + systemd.
-

@@ -10,7 +10,7 @@ Nova is running in production on a GCP Compute Engine Linux VM (no Docker), mana
 
 ## Completed
 
-- OpenClaw built from fork into `/opt/openclaw`
+- OpenClaw built from fork into `/opt/meowmoltbot/openclaw`
 - State restored to `/var/lib/openclaw`
 - Workspace restored to `/var/lib/openclaw/workspace`
 - Chromium profile restored to `/var/lib/openclaw/chrome-profile`

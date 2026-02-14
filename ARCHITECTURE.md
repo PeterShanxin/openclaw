@@ -18,7 +18,7 @@ Both services are bound to loopback only (no public ports).
 │  ┌───────────────────────────────┐     ┌─────────────────────────┐ │
 │  │ openclaw-gateway.service      │     │ chrome-headless.service │ │
 │  │                               │     │                         │ │
-│  │ node /opt/openclaw/dist/...   │     │ chromium --headless     │ │
+│  │ node /opt/meowmoltbot/openclaw/dist/...   │     │ chromium --headless     │ │
 │  │ bind: 127.0.0.1:18789         │<--->│ CDP: 127.0.0.1:9222     │ │
 │  └───────────────────────────────┘     └─────────────────────────┘ │
 │                 │                                   │               │
@@ -41,7 +41,7 @@ This repo:
 - `/opt/meowmoltbot`: runbooks/templates/scripts (not runtime state)
 
 Live runtime:
-- `/opt/openclaw`: OpenClaw source/build (fork)
+- `/opt/meowmoltbot/openclaw`: OpenClaw source/build (fork)
 - `/var/lib/openclaw`: state dir (config, credentials, media, cron runs)
 - `/var/lib/openclaw/workspace`: Nova brain (IDENTITY/SOUL/HEARTBEAT/memory/skills)
 - `/var/lib/openclaw/chrome-profile`: Chromium profile

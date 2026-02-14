@@ -14,7 +14,7 @@ Runtime stack:
 
 Canonical VM layout:
 - Ops repo (docs/templates/scripts): `/opt/meowmoltbot`
-- OpenClaw source/build (fork): `/opt/openclaw`
+- OpenClaw source/build (fork): `/opt/meowmoltbot/openclaw`
 - State dir (sessions/credentials/cron/media/config): `/var/lib/openclaw`
 - Workspace dir (SOUL/IDENTITY/HEARTBEAT/memory/skills): `/var/lib/openclaw/workspace`
 - Chromium profile dir: `/var/lib/openclaw/chrome-profile`

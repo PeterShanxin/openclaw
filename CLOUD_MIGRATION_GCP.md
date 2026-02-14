@@ -52,24 +52,21 @@ Option B (system node via distro / nodesource) also works, but keep it ≥ 22.
 Create a dedicated user + directories:
 ```bash
 sudo useradd -m -s /bin/bash openclaw || true
-sudo mkdir -p /opt/openclaw /var/lib/openclaw
-sudo chown -R openclaw:openclaw /opt/openclaw /var/lib/openclaw
+sudo mkdir -p /opt/meowmoltbot /var/lib/openclaw
+sudo chown -R openclaw:openclaw /opt/meowmoltbot /var/lib/openclaw
 ```
 
 Clone the ops repo (this repo) for templates + helper scripts:
 ```bash
-sudo git clone https://github.com/PeterShanxin/MeowMoltBot.git /opt/meowmoltbot || true
-sudo chown -R "${USER}:${USER}" /opt/meowmoltbot || true
+sudo -iu openclaw git clone <YOUR_MEOWMOLTBOT_REPO_URL> /opt/meowmoltbot || true
 ```
 
-## 3) Build OpenClaw from your fork (run on the VM)
+## 3) Build OpenClaw from the merged monorepo (run on the VM)
 
 ```bash
 sudo -iu openclaw
-cd /opt/openclaw
+cd /opt/meowmoltbot/openclaw
 
-# Use YOUR fork/branch that contains the 2026-02-10 integration work
-git clone https://github.com/PeterShanxin/openclaw.git .
 git checkout main
 
 pnpm install
