@@ -136,7 +136,8 @@ OpenClaw 有两个钩子系统：
 ## 超时
 
 - `agent.wait` 默认：30 秒（仅等待）。`timeoutMs` 参数可覆盖。
-- 智能体运行时：`agents.defaults.timeoutSeconds` 默认 600 秒；在 `runEmbeddedPiAgent` 中止计时器中强制执行。
+- 智能体运行硬超时：`agents.defaults.timeoutSeconds` 默认 `0`（无硬超时）。
+- 流空闲超时：`agents.defaults.streamIdleTimeoutSeconds` 会在长时间无流活动时中止运行。
 
 ## 可能提前结束的情况
 

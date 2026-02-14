@@ -292,6 +292,10 @@ export const FIELD_HELP: Record<string, string> = {
   "agents.defaults.imageModel.fallbacks": "Ordered fallback image models (provider/model).",
   "agents.defaults.imageMaxDimensionPx":
     "Max image side length in pixels when sanitizing transcript/tool-result image payloads (default: 1200).",
+  "agents.defaults.timeoutSeconds":
+    "Hard runtime timeout for each agent run in seconds. Set to 0 for no hard timeout (default).",
+  "agents.defaults.streamIdleTimeoutSeconds":
+    "Abort an agent run when no stream activity is observed for N seconds (0 disables idle timeout).",
   "agents.defaults.cliBackends": "Optional CLI backends for text-only fallback (claude-cli, etc.).",
   "agents.defaults.humanDelay.mode": 'Delay style for block replies ("off", "natural", "custom").',
   "agents.defaults.humanDelay.minMs": "Minimum delay in ms for custom humanDelay (default: 800).",

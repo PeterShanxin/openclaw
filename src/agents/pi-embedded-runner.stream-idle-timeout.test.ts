@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import "./test-helpers/fast-coding-tools.js";
 import type { OpenClawConfig } from "../config/config.js";
 
@@ -10,6 +10,7 @@ let tempRoot: string | undefined;
 let agentDir: string;
 let workspaceDir: string;
 let sessionCounter = 0;
+let streamSimpleCalls = 0;
 
 const nextSessionFile = () => {
   sessionCounter += 1;
@@ -49,14 +50,17 @@ vi.mock("@mariozechner/pi-ai", async () => {
   return {
     ...actual,
     // Keep complete/completeSimple usable in case some internal path relies on them.
-    complete: async (model: { api: string; provider: string; id: string }) => buildAbortMessage(model),
-    completeSimple: async (model: { api: string; provider: string; id: string }) => buildAbortMessage(model),
+    complete: async (model: { api: string; provider: string; id: string }) =>
+      buildAbortMessage(model),
+    completeSimple: async (model: { api: string; provider: string; id: string }) =>
+      buildAbortMessage(model),
     // Simulate a hung stream: no events until the caller aborts via AbortSignal.
     streamSimple: (
       model: { api: string; provider: string; id: string },
       _context: unknown,
       options?: { signal?: AbortSignal },
     ) => {
+      streamSimpleCalls += 1;
       const stream = new actual.AssistantMessageEventStream();
       const signal = options?.signal;
       if (signal) {
@@ -108,6 +112,10 @@ beforeAll(async () => {
   await fs.mkdir(workspaceDir, { recursive: true });
 }, 20_000);
 
+beforeEach(() => {
+  streamSimpleCalls = 0;
+});
+
 afterAll(async () => {
   if (!tempRoot) {
     return;
@@ -117,40 +125,68 @@ afterAll(async () => {
 });
 
 describe("streamIdleTimeoutSeconds", () => {
-  it(
-    "fails over when no streaming events are observed within the idle timeout",
-    async () => {
-      const sessionFile = nextSessionFile();
-      const cfg = {
-        ...makeOpenAiConfig(["mock-hang"]),
-        agents: {
-          defaults: {
-            // Ensure the runner throws FailoverError on timeout (outer layer can pick fallbacks).
-            model: { fallbacks: ["openai/mock-fallback"] },
-            streamIdleTimeoutSeconds: 1,
-          },
+  it("fails over when no streaming events are observed within the idle timeout", async () => {
+    const sessionFile = nextSessionFile();
+    const cfg = {
+      ...makeOpenAiConfig(["mock-hang"]),
+      agents: {
+        defaults: {
+          // Ensure the runner throws FailoverError on timeout (outer layer can pick fallbacks).
+          model: { fallbacks: ["openai/mock-fallback"] },
+          streamIdleTimeoutSeconds: 1,
         },
-      } satisfies OpenClawConfig;
+      },
+    } satisfies OpenClawConfig;
 
-      await expect(
-        runEmbeddedPiAgent({
-          sessionId: "session:test-stream-idle-timeout",
-          sessionKey: "agent:test:embedded",
-          sessionFile,
-          workspaceDir,
-          config: cfg,
-          prompt: "hello",
-          provider: "openai",
-          model: "mock-hang",
-          // Keep the overall timeout long; we want stream-idle to trip first.
-          timeoutMs: 60_000,
-          agentDir,
-          runId: "run-stream-idle-timeout",
-          enqueue: immediateEnqueue,
-        }),
-      ).rejects.toMatchObject({ name: "FailoverError", reason: "timeout" });
-    },
-    20_000,
-  );
+    await expect(
+      runEmbeddedPiAgent({
+        sessionId: "session:test-stream-idle-timeout",
+        sessionKey: "agent:test:embedded",
+        sessionFile,
+        workspaceDir,
+        config: cfg,
+        prompt: "hello",
+        provider: "openai",
+        model: "mock-hang",
+        // Keep the overall timeout long; we want stream-idle to trip first.
+        timeoutMs: 60_000,
+        agentDir,
+        runId: "run-stream-idle-timeout",
+        enqueue: immediateEnqueue,
+      }),
+    ).rejects.toMatchObject({ name: "FailoverError", reason: "timeout" });
+    expect(streamSimpleCalls).toBe(2);
+  }, 20_000);
+
+  it("returns a local run-timeout error payload without model fallback on run budget timeout", async () => {
+    const sessionFile = nextSessionFile();
+    const cfg = {
+      ...makeOpenAiConfig(["mock-hang"]),
+      agents: {
+        defaults: {
+          streamIdleTimeoutSeconds: 30,
+        },
+      },
+    } satisfies OpenClawConfig;
+
+    const result = await runEmbeddedPiAgent({
+      sessionId: "session:test-run-budget-timeout",
+      sessionKey: "agent:test:embedded",
+      sessionFile,
+      workspaceDir,
+      config: cfg,
+      prompt: "hello",
+      provider: "openai",
+      model: "mock-hang",
+      timeoutMs: 200,
+      agentDir,
+      runId: "run-budget-timeout",
+      enqueue: immediateEnqueue,
+    });
+
+    expect(result.meta.error).toMatchObject({ kind: "run_timeout" });
+    expect(result.payloads?.[0]?.text).toContain("local run budget timeout");
+    expect(result.payloads?.[0]?.text).toContain("agents.defaults.timeoutSeconds");
+    expect(streamSimpleCalls).toBe(1);
+  }, 20_000);
 });
-

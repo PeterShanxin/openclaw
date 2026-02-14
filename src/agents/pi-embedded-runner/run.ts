@@ -324,6 +324,7 @@ export async function runEmbeddedPiAgent(
       const initialThinkLevel = params.thinkLevel ?? "off";
       let thinkLevel = initialThinkLevel;
       const attemptedThinking = new Set<ThinkLevel>();
+      let streamIdleRetryUsed = false;
       let apiKeyInfo: ApiKeyInfo | null = null;
       let lastProfileId: string | undefined;
 
@@ -418,6 +419,7 @@ export async function runEmbeddedPiAgent(
             profileIndex = nextIndex;
             thinkLevel = initialThinkLevel;
             attemptedThinking.clear();
+            streamIdleRetryUsed = false;
             return true;
           } catch (err) {
             if (candidate && candidate === lockedProfileId) {
@@ -538,11 +540,15 @@ export async function runEmbeddedPiAgent(
             promptError,
             timedOut,
             timedOutDuringCompaction,
+            timeoutOrigin,
             sessionIdUsed,
             lastAssistant,
           } = attempt;
           const lastAssistantUsage = normalizeUsage(lastAssistant?.usage as UsageLike);
           const attemptUsage = attempt.attemptUsage ?? lastAssistantUsage;
+          if (!timedOut) {
+            streamIdleRetryUsed = false;
+          }
           mergeUsageIntoAccumulator(usageAccumulator, attemptUsage);
           // Keep prompt size from the latest model call so session totalTokens
           // reflects current context usage, not accumulated tool-loop usage.
@@ -861,6 +867,47 @@ export async function runEmbeddedPiAgent(
             continue;
           }
 
+          const runBudgetTimedOut = timedOut && timeoutOrigin === "run_budget";
+          const streamIdleTimedOut = timedOut && timeoutOrigin === "stream_idle";
+
+          if (runBudgetTimedOut) {
+            const message =
+              `Local runtime timeout reached after ${Math.max(1, params.timeoutMs)}ms. ` +
+              "This was a local run budget timeout, not a provider HTTP timeout. " +
+              "For long tasks, set `agents.defaults.timeoutSeconds` to 0 (unlimited).";
+            const usage = toNormalizedUsage(usageAccumulator);
+            return {
+              payloads: [
+                {
+                  text: message,
+                  isError: true,
+                },
+              ],
+              meta: {
+                durationMs: Date.now() - started,
+                agentMeta: {
+                  sessionId: sessionIdUsed,
+                  provider,
+                  model: model.id,
+                  usage,
+                  compactionCount: autoCompactionCount > 0 ? autoCompactionCount : undefined,
+                },
+                systemPromptReport: attempt.systemPromptReport,
+                error: { kind: "run_timeout", message },
+              },
+            };
+          }
+
+          if (streamIdleTimedOut && !streamIdleRetryUsed) {
+            streamIdleRetryUsed = true;
+            if (!isProbeSession) {
+              log.warn(
+                `stream idle timeout detected for ${provider}/${modelId}; retrying same model/profile once before fallback`,
+              );
+            }
+            continue;
+          }
+
           const authFailure = isAuthAssistantError(lastAssistant);
           const rateLimitFailure = isRateLimitAssistantError(lastAssistant);
           const billingFailure = isBillingAssistantError(lastAssistant);
@@ -907,10 +954,12 @@ export async function runEmbeddedPiAgent(
             );
           }
 
+          if (!streamIdleTimedOut) {
+            streamIdleRetryUsed = false;
+          }
+
           // Treat timeout as potential rate limit (Antigravity hangs on rate limit)
-          // But exclude post-prompt compaction timeouts (model succeeded; no profile issue)
-          const shouldRotate =
-            (!aborted && failoverFailure) || (timedOut && !timedOutDuringCompaction);
+          const shouldRotate = (!aborted && failoverFailure) || streamIdleTimedOut;
 
           if (shouldRotate) {
             if (lastProfileId) {

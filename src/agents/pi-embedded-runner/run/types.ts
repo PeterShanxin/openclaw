@@ -21,11 +21,14 @@ export type EmbeddedRunAttemptParams = EmbeddedRunAttemptBase & {
   thinkLevel: ThinkLevel;
 };
 
+export type EmbeddedTimeoutOrigin = "run_budget" | "stream_idle" | "external_timeout";
+
 export type EmbeddedRunAttemptResult = {
   aborted: boolean;
   timedOut: boolean;
   /** True if the timeout occurred while compaction was in progress or pending. */
   timedOutDuringCompaction: boolean;
+  timeoutOrigin?: EmbeddedTimeoutOrigin;
   promptError: unknown;
   sessionIdUsed: string;
   systemPromptReport?: SessionSystemPromptReport;
