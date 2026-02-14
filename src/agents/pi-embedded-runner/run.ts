@@ -600,6 +600,16 @@ export async function runEmbeddedPiAgent(
 
           if (promptError && !aborted) {
             const errorText = describeUnknownError(promptError);
+            // Log unrecognized prompt errors for diagnostic purposes.
+            // Helps identify provider-specific error formats (e.g. GLM context overflow)
+            // that don't match existing isContextOverflowError() patterns.
+            if (!isContextOverflowError(errorText)) {
+              log.warn(
+                `[prompt-error-diag] provider=${provider}/${modelId} ` +
+                  `session=${redactedSessionKey} ` +
+                  `error=${errorText.slice(0, 500)}`,
+              );
+            }
             // Handle role ordering errors with a user-friendly message
             if (/incorrect role information|roles must alternate/i.test(errorText)) {
               return {
@@ -729,6 +739,25 @@ export async function runEmbeddedPiAgent(
               .join(" ");
             log.warn(
               `Profile ${lastProfileId} rejected image payload${details ? ` (${details})` : ""}.`,
+            );
+          }
+
+          // Log unclassified assistant errors for diagnostic purposes.
+          // Helps identify provider-specific error formats that don't match
+          // existing classification patterns (e.g. GLM silent failures).
+          if (
+            lastAssistant?.stopReason === "error" &&
+            !authFailure &&
+            !rateLimitFailure &&
+            !billingFailure &&
+            !failoverFailure &&
+            !imageDimensionError &&
+            !aborted
+          ) {
+            log.warn(
+              `[assistant-error-diag] provider=${provider}/${modelId} ` +
+                `session=${redactedSessionKey} ` +
+                `error=${(lastAssistant.errorMessage ?? "unknown").slice(0, 500)}`,
             );
           }
 

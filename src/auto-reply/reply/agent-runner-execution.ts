@@ -514,6 +514,18 @@ export async function runAgentTurnWithFallback(params: {
       fallbackProvider = fallbackResult.provider;
       fallbackModel = fallbackResult.model;
 
+      // Track overflow-retry compactions from run.ts that don't emit stream events.
+      // The run.ts overflow-retry loop calls compactEmbeddedPiSessionDirect() outside
+      // the session stream, so no compaction events are emitted. Detect those via
+      // agentMeta.compactionCount which is set by the overflow-retry path.
+      if (
+        !autoCompactionCompleted &&
+        runResult.meta?.agentMeta?.compactionCount &&
+        runResult.meta.agentMeta.compactionCount > 0
+      ) {
+        autoCompactionCompleted = true;
+      }
+
       // Some embedded runs surface context overflow as an error payload instead of throwing.
       // Treat those as a session-level failure and auto-recover by starting a fresh session.
       const embeddedError = runResult.meta?.error;

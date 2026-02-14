@@ -58,10 +58,24 @@ export async function runMemoryFlushIfNeeded(params: {
     return sandboxCfg.workspaceAccess === "rw";
   })();
 
+  // Allow memory flush during heartbeats when context usage is critically high (>= 90%).
+  // Normally heartbeats are excluded to save tokens, but at critical levels we must compact
+  // proactively to avoid hitting the context limit and causing silent API failures.
+  const allowHeartbeatFlush =
+    params.isHeartbeat &&
+    (() => {
+      const entry =
+        params.sessionEntry ??
+        (params.sessionKey ? params.sessionStore?.[params.sessionKey] : undefined);
+      const total = entry?.totalTokens ?? 0;
+      const ctx = entry?.contextTokens ?? 0;
+      return ctx > 0 && total > 0 && total / ctx >= 0.9;
+    })();
+
   const shouldFlushMemory =
     memoryFlushSettings &&
     memoryFlushWritable &&
-    !params.isHeartbeat &&
+    (!params.isHeartbeat || allowHeartbeatFlush) &&
     !isCliProvider(params.followupRun.run.provider, params.cfg) &&
     shouldRunMemoryFlush({
       entry:
