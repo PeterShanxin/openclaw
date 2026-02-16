@@ -1047,7 +1047,7 @@ export async function runEmbeddedAttempt(
             typeof entry.toolName === "string" && entry.toolName.trim().length > 0,
         )
         .map((entry) => ({ toolName: entry.toolName, meta: entry.meta }));
-      const usageTotals = getUsageTotals();
+      const usageTotals = getUsageTotals() ?? { input: 0, output: 0, cacheRead: 0 };
       if (params.onAgentEvent) {
         const metrics: Array<{
           metric: "token.input" | "token.output" | "token.cache_read";
