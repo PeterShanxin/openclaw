@@ -100,6 +100,22 @@ export async function runAgentTurnWithFallback(params: {
   let didResetAfterCompactionFailure = false;
   let fallbackNoticeCount = 0;
 
+  // Hard guard: if context is at capacity (>= 98%), don't waste time on
+  // LLM calls that will inevitably fail — give the user immediate feedback.
+  const preflightEntry = params.getActiveSessionEntry();
+  if (preflightEntry) {
+    const pfTotal = preflightEntry.totalTokens ?? 0;
+    const pfCtx = preflightEntry.contextTokens ?? 0;
+    if (pfCtx > 0 && pfTotal > 0 && pfTotal / pfCtx >= 0.98) {
+      return {
+        kind: "final",
+        payload: {
+          text: "⚠️ Context is at capacity. Please use /reset or /new to start a fresh session.",
+        },
+      };
+    }
+  }
+
   while (true) {
     try {
       const allowPartialStream = !(
@@ -640,11 +656,23 @@ export async function runAgentTurnWithFallback(params: {
 
       defaultRuntime.error(`Embedded agent failed before reply: ${message}`);
       const trimmedMessage = message.replace(/\.\s*$/, "");
+
+      // When all models fail AND context is near capacity, nudge the user to reset.
+      const errorEntry = params.getActiveSessionEntry();
+      const isContextNearCapacity =
+        errorEntry &&
+        typeof errorEntry.totalTokens === "number" &&
+        typeof errorEntry.contextTokens === "number" &&
+        errorEntry.contextTokens > 0 &&
+        errorEntry.totalTokens / errorEntry.contextTokens >= 0.85;
+
       const fallbackText = isContextOverflow
         ? "⚠️ Context overflow — prompt too large for this model. Try a shorter message or a larger-context model."
         : isRoleOrderingError
           ? "⚠️ Message ordering conflict - please try again. If this persists, use /new to start a fresh session."
-          : `⚠️ Agent failed before reply: ${trimmedMessage}.\nLogs: openclaw logs --follow`;
+          : isContextNearCapacity
+            ? `⚠️ Agent failed before reply: ${trimmedMessage}.\n💡 Context is nearly full. Try /reset or /new to start a fresh session.`
+            : `⚠️ Agent failed before reply: ${trimmedMessage}.\nLogs: openclaw logs --follow`;
 
       return {
         kind: "final",

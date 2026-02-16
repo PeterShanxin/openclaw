@@ -30,7 +30,7 @@ import {
   isAudioPayload,
   signalTypingIfNeeded,
 } from "./agent-runner-helpers.js";
-import { runMemoryFlushIfNeeded } from "./agent-runner-memory.js";
+import { runMemoryFlushIfNeeded, runProactiveCompactionIfNeeded } from "./agent-runner-memory.js";
 import { buildReplyPayloads } from "./agent-runner-payloads.js";
 import { appendUsageLine, formatResponseUsageLine } from "./agent-runner-utils.js";
 import { createAudioAsVoiceBuffer, createBlockReplyPipeline } from "./block-reply-pipeline.js";
@@ -211,6 +211,21 @@ export async function runReplyAgent(params: {
     sessionStore: activeSessionStore,
     sessionKey,
     storePath,
+    isHeartbeat,
+  });
+
+  // Proactive compaction: compact before the main LLM call when context usage
+  // is high (>= 85%).  Prevents the deadlock where rate-limit errors pre-empt
+  // context overflow detection and reactive compaction never triggers.
+  activeSessionEntry = await runProactiveCompactionIfNeeded({
+    cfg,
+    followupRun,
+    sessionEntry: activeSessionEntry,
+    sessionStore: activeSessionStore,
+    sessionKey,
+    storePath,
+    defaultModel,
+    agentCfgContextTokens,
     isHeartbeat,
   });
 
