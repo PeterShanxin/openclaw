@@ -74,6 +74,30 @@ export function resolveMemoryFlushContextWindowTokens(params: {
   );
 }
 
+export const DEFAULT_PROACTIVE_COMPACTION_THRESHOLD_RATIO = 0.85;
+
+/**
+ * Returns true when session context usage exceeds a threshold ratio,
+ * indicating that proactive compaction should be attempted before the
+ * main LLM call — rather than waiting for a reactive context overflow error.
+ */
+export function shouldRunProactiveCompaction(params: {
+  entry?: Pick<SessionEntry, "totalTokens" | "contextTokens">;
+  contextWindowTokens: number;
+  thresholdRatio?: number;
+}): boolean {
+  const total = params.entry?.totalTokens;
+  if (!total || total <= 0) {
+    return false;
+  }
+  const ctx = params.entry?.contextTokens ?? params.contextWindowTokens;
+  if (ctx <= 0) {
+    return false;
+  }
+  const threshold = params.thresholdRatio ?? DEFAULT_PROACTIVE_COMPACTION_THRESHOLD_RATIO;
+  return total / ctx >= threshold;
+}
+
 export function shouldRunMemoryFlush(params: {
   entry?: Pick<SessionEntry, "totalTokens" | "compactionCount" | "memoryFlushCompactionCount">;
   contextWindowTokens: number;

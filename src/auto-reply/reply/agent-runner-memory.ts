@@ -17,10 +17,12 @@ import {
 import { logVerbose } from "../../globals.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
 import { buildThreadingToolContext, resolveEnforceFinalTag } from "./agent-runner-utils.js";
+import { compactEmbeddedPiSession } from "../../agents/pi-embedded-runner/compact.js";
 import {
   resolveMemoryFlushContextWindowTokens,
   resolveMemoryFlushSettings,
   shouldRunMemoryFlush,
+  shouldRunProactiveCompaction,
 } from "./memory-flush.js";
 import { incrementCompactionCount } from "./session-updates.js";
 
@@ -213,4 +215,123 @@ export async function runMemoryFlushIfNeeded(params: {
   }
 
   return activeSessionEntry;
+}
+
+/**
+ * Proactive compaction: triggers compaction when context usage exceeds a threshold
+ * (default 85%), BEFORE the main LLM call.  This prevents the deadlock where
+ * rate-limit errors pre-empt context overflow detection and compaction never fires.
+ *
+ * Uses the lane-queued `compactEmbeddedPiSession` (safe — we are NOT inside a lane
+ * at this call site).  Failure is non-fatal; the main LLM call proceeds regardless.
+ */
+export async function runProactiveCompactionIfNeeded(params: {
+  cfg: OpenClawConfig;
+  followupRun: FollowupRun;
+  sessionEntry?: SessionEntry;
+  sessionStore?: Record<string, SessionEntry>;
+  sessionKey?: string;
+  storePath?: string;
+  defaultModel: string;
+  agentCfgContextTokens?: number;
+  isHeartbeat: boolean;
+}): Promise<SessionEntry | undefined> {
+  const entry =
+    params.sessionEntry ??
+    (params.sessionKey ? params.sessionStore?.[params.sessionKey] : undefined);
+
+  const contextWindowTokens = resolveMemoryFlushContextWindowTokens({
+    modelId: params.followupRun.run.model ?? params.defaultModel,
+    agentCfgContextTokens: params.agentCfgContextTokens,
+  });
+
+  if (
+    !shouldRunProactiveCompaction({
+      entry,
+      contextWindowTokens,
+    })
+  ) {
+    return params.sessionEntry;
+  }
+
+  // Skip during heartbeats unless context is critically high (>= 95%).
+  if (params.isHeartbeat) {
+    const total = entry?.totalTokens ?? 0;
+    const ctx = entry?.contextTokens ?? contextWindowTokens;
+    if (ctx <= 0 || total / ctx < 0.95) {
+      return params.sessionEntry;
+    }
+  }
+
+  // Skip for CLI providers (they manage their own context).
+  if (isCliProvider(params.followupRun.run.provider, params.cfg)) {
+    return params.sessionEntry;
+  }
+
+  const run = params.followupRun.run;
+  logVerbose(
+    `proactive compaction: context at ${entry?.totalTokens}/${entry?.contextTokens ?? contextWindowTokens} tokens — attempting compaction`,
+  );
+
+  try {
+    const compactResult = await compactEmbeddedPiSession({
+      sessionId: run.sessionId,
+      sessionKey: run.sessionKey,
+      messageChannel: run.messageProvider,
+      messageProvider: run.messageProvider,
+      agentAccountId: run.agentAccountId,
+      groupId: run.groupId,
+      groupChannel: run.groupChannel,
+      groupSpace: run.groupSpace,
+      sessionFile: run.sessionFile,
+      workspaceDir: run.workspaceDir,
+      agentDir: run.agentDir,
+      config: run.config,
+      skillsSnapshot: run.skillsSnapshot,
+      provider: run.provider,
+      model: run.model,
+      thinkLevel: run.thinkLevel,
+      reasoningLevel: run.reasoningLevel,
+      bashElevated: run.bashElevated,
+      extraSystemPrompt: run.extraSystemPrompt,
+      ownerNumbers: run.ownerNumbers,
+    });
+
+    if (compactResult.compacted) {
+      logVerbose("proactive compaction succeeded");
+      const nextCount = await incrementCompactionCount({
+        sessionEntry: params.sessionEntry,
+        sessionStore: params.sessionStore,
+        sessionKey: params.sessionKey,
+        storePath: params.storePath,
+      });
+
+      // Persist updated token counts from compaction.
+      // Reset totalTokens so the downstream hard guard (>= 98% capacity)
+      // does not block the next LLM call with stale pre-compaction values.
+      if (params.storePath && params.sessionKey) {
+        try {
+          const updatedEntry = await updateSessionStoreEntry({
+            storePath: params.storePath,
+            sessionKey: params.sessionKey,
+            update: async (existing) => ({
+              compactionCount: nextCount ?? (existing.compactionCount ?? 0) + 1,
+              totalTokens: compactResult.result?.tokensAfter ?? 0,
+            }),
+          });
+          if (updatedEntry) {
+            return updatedEntry;
+          }
+        } catch (err) {
+          logVerbose(`failed to persist proactive compaction metadata: ${String(err)}`);
+        }
+      }
+    } else {
+      logVerbose(`proactive compaction skipped: ${compactResult.reason ?? "nothing to compact"}`);
+    }
+  } catch (err) {
+    logVerbose(`proactive compaction failed: ${String(err)}`);
+  }
+
+  return params.sessionEntry;
 }

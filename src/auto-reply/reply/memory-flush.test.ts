@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MEMORY_FLUSH_SOFT_TOKENS,
+  DEFAULT_PROACTIVE_COMPACTION_THRESHOLD_RATIO,
   resolveMemoryFlushContextWindowTokens,
   resolveMemoryFlushSettings,
   shouldRunMemoryFlush,
+  shouldRunProactiveCompaction,
 } from "./memory-flush.js";
 
 describe("memory flush settings", () => {
@@ -112,6 +114,97 @@ describe("shouldRunMemoryFlush", () => {
         softThresholdTokens: 2_000,
       }),
     ).toBe(true);
+  });
+});
+
+describe("shouldRunProactiveCompaction", () => {
+  it("returns false when entry is missing", () => {
+    expect(
+      shouldRunProactiveCompaction({
+        entry: undefined,
+        contextWindowTokens: 128_000,
+      }),
+    ).toBe(false);
+  });
+
+  it("returns false when totalTokens is 0", () => {
+    expect(
+      shouldRunProactiveCompaction({
+        entry: { totalTokens: 0 },
+        contextWindowTokens: 128_000,
+      }),
+    ).toBe(false);
+  });
+
+  it("returns false when below threshold", () => {
+    expect(
+      shouldRunProactiveCompaction({
+        entry: { totalTokens: 80_000, contextTokens: 128_000 },
+        contextWindowTokens: 128_000,
+      }),
+    ).toBe(false);
+  });
+
+  it("returns true at default threshold (85%)", () => {
+    expect(
+      shouldRunProactiveCompaction({
+        entry: { totalTokens: 109_000, contextTokens: 128_000 },
+        contextWindowTokens: 128_000,
+      }),
+    ).toBe(true);
+  });
+
+  it("uses contextWindowTokens when entry.contextTokens is missing", () => {
+    expect(
+      shouldRunProactiveCompaction({
+        entry: { totalTokens: 109_000 },
+        contextWindowTokens: 128_000,
+      }),
+    ).toBe(true);
+  });
+
+  it("respects custom threshold ratio", () => {
+    // 70% of 100k = 70k — entry has 75k, should trigger
+    expect(
+      shouldRunProactiveCompaction({
+        entry: { totalTokens: 75_000, contextTokens: 100_000 },
+        contextWindowTokens: 100_000,
+        thresholdRatio: 0.7,
+      }),
+    ).toBe(true);
+
+    // 90% of 100k = 90k — entry has 85k, should NOT trigger
+    expect(
+      shouldRunProactiveCompaction({
+        entry: { totalTokens: 85_000, contextTokens: 100_000 },
+        contextWindowTokens: 100_000,
+        thresholdRatio: 0.9,
+      }),
+    ).toBe(false);
+  });
+
+  it("returns true at exactly the threshold boundary", () => {
+    // 85% of 100 = 85
+    expect(
+      shouldRunProactiveCompaction({
+        entry: { totalTokens: 85, contextTokens: 100 },
+        contextWindowTokens: 100,
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false just below the threshold", () => {
+    // 84/100 = 0.84 < 0.85
+    expect(
+      shouldRunProactiveCompaction({
+        entry: { totalTokens: 84, contextTokens: 100 },
+        contextWindowTokens: 100,
+      }),
+    ).toBe(false);
+  });
+
+  it("exports the default threshold constant", () => {
+    expect(DEFAULT_PROACTIVE_COMPACTION_THRESHOLD_RATIO).toBe(0.85);
   });
 });
 
