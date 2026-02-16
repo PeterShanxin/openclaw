@@ -1,6 +1,6 @@
 import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
-import { lookupContextTokens } from "../../agents/context.js";
+import { resolveContextWindowInfo } from "../../agents/context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import { DEFAULT_PI_COMPACTION_RESERVE_TOKENS_FLOOR } from "../../agents/pi-settings.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
@@ -66,15 +66,53 @@ function ensureNoReplyHint(text: string): string {
 }
 
 export function resolveMemoryFlushContextWindowTokens(params: {
+  cfg?: OpenClawConfig;
+  provider?: string;
   modelId?: string;
   agentCfgContextTokens?: number;
 }): number {
-  return (
-    lookupContextTokens(params.modelId) ?? params.agentCfgContextTokens ?? DEFAULT_CONTEXT_TOKENS
-  );
+  const info = resolveContextWindowInfo({
+    cfg: params.cfg,
+    provider: params.provider ?? "",
+    modelId: params.modelId ?? "",
+    defaultTokens: DEFAULT_CONTEXT_TOKENS,
+  });
+  const cap = normalizePositiveInt(params.agentCfgContextTokens);
+  return cap ? Math.min(info.tokens, cap) : info.tokens;
 }
 
 export const DEFAULT_PROACTIVE_COMPACTION_THRESHOLD_RATIO = 0.85;
+export const DEFAULT_HEARTBEAT_PROACTIVE_COMPACTION_THRESHOLD_RATIO = 0.8;
+export const DEFAULT_HEARTBEAT_MAX_INPUT_TOKENS_PER_TURN = 24_000;
+
+function normalizePositiveInt(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  const int = Math.floor(value);
+  return int > 0 ? int : null;
+}
+
+function normalizeRatio(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(0.99, Math.max(0.1, value));
+}
+
+export function resolveHeartbeatProactiveCompactionThreshold(cfg?: OpenClawConfig): number {
+  return normalizeRatio(
+    cfg?.agents?.defaults?.compaction?.heartbeatThresholdPct,
+    DEFAULT_HEARTBEAT_PROACTIVE_COMPACTION_THRESHOLD_RATIO,
+  );
+}
+
+export function resolveHeartbeatMaxInputTokens(cfg?: OpenClawConfig): number {
+  return (
+    normalizePositiveInt(cfg?.agents?.defaults?.heartbeat?.maxInputTokensPerTurn) ??
+    DEFAULT_HEARTBEAT_MAX_INPUT_TOKENS_PER_TURN
+  );
+}
 
 /**
  * Returns true when session context usage exceeds a threshold ratio,

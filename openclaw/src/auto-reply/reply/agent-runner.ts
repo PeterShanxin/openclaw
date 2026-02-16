@@ -4,7 +4,7 @@ import type { TypingMode } from "../../config/types.js";
 import type { OriginatingChannelType, TemplateContext } from "../templating.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import type { TypingController } from "./typing.js";
-import { lookupContextTokens } from "../../agents/context.js";
+import { resolveContextWindowInfo } from "../../agents/context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import { resolveModelAuthMode } from "../../agents/model-auth.js";
 import { isCliProvider } from "../../agents/model-selection.js";
@@ -393,11 +393,12 @@ export async function runReplyAgent(params: {
     const cliSessionId = isCliProvider(providerUsed, cfg)
       ? runResult.meta.agentMeta?.sessionId?.trim()
       : undefined;
-    const contextTokensUsed =
-      agentCfgContextTokens ??
-      lookupContextTokens(modelUsed) ??
-      activeSessionEntry?.contextTokens ??
-      DEFAULT_CONTEXT_TOKENS;
+    const contextTokensUsed = resolveContextWindowInfo({
+      cfg,
+      provider: providerUsed,
+      modelId: modelUsed,
+      defaultTokens: DEFAULT_CONTEXT_TOKENS,
+    }).tokens;
 
     await persistSessionUsageUpdate({
       storePath,

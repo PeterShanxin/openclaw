@@ -30,6 +30,20 @@ export type SessionEntry = {
   lastHeartbeatText?: string;
   /** Timestamp (ms) when lastHeartbeatText was delivered. */
   lastHeartbeatSentAt?: number;
+  /** Heartbeat prompt hash from the previous run (used to detect repeats). */
+  heartbeatPromptHash?: string;
+  /** Consecutive run count for heartbeatPromptHash. */
+  heartbeatPromptHashRepeats?: number;
+  /** Consecutive heartbeat runs where prior inputTokens exceeded maxInputTokensPerTurn. */
+  heartbeatOverBudgetStreak?: number;
+  /** Number of heartbeat runs since the last automatic heartbeat reset. */
+  heartbeatTurnsSinceReset?: number;
+  /** Timestamp of the last automatic heartbeat reset (ms). */
+  heartbeatResetAt?: number;
+  /** One-time carry-forward summary injected into prompt after heartbeat reset. */
+  heartbeatCarryForwardSummary?: string;
+  /** Last heartbeat reset reason label. */
+  heartbeatResetReason?: string;
   sessionId: string;
   updatedAt: number;
   sessionFile?: string;

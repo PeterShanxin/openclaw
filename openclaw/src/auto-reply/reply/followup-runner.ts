@@ -5,7 +5,7 @@ import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import type { FollowupRun } from "./queue.js";
 import type { TypingController } from "./typing.js";
 import { resolveAgentModelFallbacksOverride } from "../../agents/agent-scope.js";
-import { lookupContextTokens } from "../../agents/context.js";
+import { resolveContextWindowInfo } from "../../agents/context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
 import { runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
@@ -245,18 +245,20 @@ export function createFollowupRunner(params: {
       if (storePath && sessionKey) {
         const usage = runResult.meta.agentMeta?.usage;
         const modelUsed = runResult.meta.agentMeta?.model ?? fallbackModel ?? defaultModel;
-        const contextTokensUsed =
-          agentCfgContextTokens ??
-          lookupContextTokens(modelUsed) ??
-          sessionEntry?.contextTokens ??
-          DEFAULT_CONTEXT_TOKENS;
+        const providerUsed = runResult.meta.agentMeta?.provider ?? fallbackProvider;
+        const contextTokensUsed = resolveContextWindowInfo({
+          cfg: queued.run.config,
+          provider: providerUsed,
+          modelId: modelUsed,
+          defaultTokens: DEFAULT_CONTEXT_TOKENS,
+        }).tokens;
 
         await persistSessionUsageUpdate({
           storePath,
           sessionKey,
           usage,
           modelUsed,
-          providerUsed: fallbackProvider,
+          providerUsed,
           contextTokensUsed,
           logLabel: "followup",
         });

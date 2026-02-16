@@ -27,6 +27,12 @@ export type AgentModelListConfig = {
 
 export type AgentContextPruningConfig = {
   mode?: "off" | "cache-ttl";
+  /** Provider selection policy for pruning (default: "all"). */
+  providersMode?: "all" | "allowlist";
+  /** Providers explicitly allowed when providersMode is "allowlist". */
+  allowProviders?: string[];
+  /** Providers excluded when providersMode is "all". */
+  denyProviders?: string[];
   /** TTL to consider cache expired (duration string, default unit: minutes). */
   ttl?: string;
   keepLastAssistants?: number;
@@ -130,6 +136,13 @@ export type AgentDefaultsConfig = {
   cliBackends?: Record<string, CliBackendConfig>;
   /** Opt-in: prune old tool results from the LLM context to reduce token usage. */
   contextPruning?: AgentContextPruningConfig;
+  /** Tool output budgets for tool result content persisted into model context. */
+  toolOutputBudget?: {
+    /** Max chars persisted for `read` tool results (default: 12000). */
+    readChars?: number;
+    /** Max chars persisted for `exec` tool results (default: 8000). */
+    execChars?: number;
+  };
   /** Compaction tuning and pre-compaction memory flush behavior. */
   compaction?: AgentCompactionConfig;
   /** Vector memory search configuration (per-agent overrides supported). */
@@ -196,6 +209,12 @@ export type AgentDefaultsConfig = {
     prompt?: string;
     /** Max chars allowed after HEARTBEAT_OK before delivery (default: 30). */
     ackMaxChars?: number;
+    /** Reset heartbeat session when usage reaches this context percentage (default: 0.7). */
+    resetThresholdPct?: number;
+    /** Minimum heartbeat runs between automatic resets (default: 3). */
+    minTurnsBetweenResets?: number;
+    /** Max allowed heartbeat input tokens per turn before protective reset logic (default: 24000). */
+    maxInputTokensPerTurn?: number;
     /**
      * When enabled, deliver the model's reasoning payload for heartbeat runs (when available)
      * as a separate message prefixed with `Reasoning:` (same as `/reasoning on`).
@@ -258,6 +277,8 @@ export type AgentCompactionConfig = {
   reserveTokensFloor?: number;
   /** Max share of context window for history during safeguard pruning (0.1–0.9, default 0.5). */
   maxHistoryShare?: number;
+  /** Proactive compaction threshold for heartbeat runs (0.1–0.99, default 0.8). */
+  heartbeatThresholdPct?: number;
   /** Pre-compaction memory flush (agentic turn). Default: enabled. */
   memoryFlush?: AgentCompactionMemoryFlushConfig;
 };

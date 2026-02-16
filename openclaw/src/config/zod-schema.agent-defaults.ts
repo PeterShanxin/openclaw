@@ -58,6 +58,9 @@ export const AgentDefaultsSchema = z
     contextPruning: z
       .object({
         mode: z.union([z.literal("off"), z.literal("cache-ttl")]).optional(),
+        providersMode: z.union([z.literal("all"), z.literal("allowlist")]).optional(),
+        allowProviders: z.array(z.string()).optional(),
+        denyProviders: z.array(z.string()).optional(),
         ttl: z.string().optional(),
         keepLastAssistants: z.number().int().nonnegative().optional(),
         softTrimRatio: z.number().min(0).max(1).optional(),
@@ -88,11 +91,19 @@ export const AgentDefaultsSchema = z
       })
       .strict()
       .optional(),
+    toolOutputBudget: z
+      .object({
+        readChars: z.number().int().nonnegative().optional(),
+        execChars: z.number().int().nonnegative().optional(),
+      })
+      .strict()
+      .optional(),
     compaction: z
       .object({
         mode: z.union([z.literal("default"), z.literal("safeguard")]).optional(),
         reserveTokensFloor: z.number().int().nonnegative().optional(),
         maxHistoryShare: z.number().min(0.1).max(0.9).optional(),
+        heartbeatThresholdPct: z.number().min(0.1).max(0.99).optional(),
         memoryFlush: z
           .object({
             enabled: z.boolean().optional(),

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ReplyPayload } from "../auto-reply/types.js";
@@ -31,6 +32,7 @@ import {
   resolveAgentIdFromSessionKey,
   resolveAgentMainSessionKey,
   resolveSessionFilePath,
+  resolveSessionTranscriptPath,
   resolveStorePath,
   saveSessionStore,
   updateSessionStore,
@@ -40,6 +42,7 @@ import { getQueueSize } from "../process/command-queue.js";
 import { CommandLane } from "../process/lanes.js";
 import { normalizeAgentId, toAgentStoreSessionKey } from "../routing/session-key.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
+import { emitAgentEvent } from "./agent-events.js";
 import { formatErrorMessage } from "./errors.js";
 import { emitHeartbeatEvent, resolveIndicatorType } from "./heartbeat-events.js";
 import { buildHeartbeatMainSessionContext } from "./heartbeat-main-context.js";
@@ -104,6 +107,235 @@ const EXEC_EVENT_PROMPT =
 const CRON_EVENT_PROMPT =
   "A scheduled reminder has been triggered. The reminder message is shown in the system messages above. " +
   "Please relay this reminder to the user in a helpful and friendly way.";
+
+const DEFAULT_HEARTBEAT_RESET_THRESHOLD_PCT = 0.7;
+const DEFAULT_HEARTBEAT_MIN_TURNS_BETWEEN_RESETS = 3;
+const DEFAULT_HEARTBEAT_MAX_INPUT_TOKENS_PER_TURN = 24_000;
+const HEARTBEAT_REPEAT_GUARD_INPUT_TOKENS = 20_000;
+const HEARTBEAT_REPEAT_GUARD_REPEAT_LIMIT = 3;
+const HEARTBEAT_CARRY_FORWARD_MAX_CHARS = 4_800;
+
+type HeartbeatRuntimeBudget = {
+  resetThresholdPct: number;
+  minTurnsBetweenResets: number;
+  maxInputTokensPerTurn: number;
+};
+
+function normalizePositiveInt(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  const normalized = Math.floor(value);
+  return normalized > 0 ? normalized : null;
+}
+
+function normalizeNonNegativeInt(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  const normalized = Math.floor(value);
+  return normalized >= 0 ? normalized : null;
+}
+
+function normalizeRatio(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(0.99, Math.max(0.1, value));
+}
+
+function resolveHeartbeatRuntimeBudget(
+  cfg: OpenClawConfig,
+  heartbeat?: HeartbeatConfig,
+): HeartbeatRuntimeBudget {
+  const defaults = cfg.agents?.defaults?.heartbeat;
+  return {
+    resetThresholdPct: normalizeRatio(
+      heartbeat?.resetThresholdPct ?? defaults?.resetThresholdPct,
+      DEFAULT_HEARTBEAT_RESET_THRESHOLD_PCT,
+    ),
+    minTurnsBetweenResets:
+      normalizeNonNegativeInt(
+        heartbeat?.minTurnsBetweenResets ?? defaults?.minTurnsBetweenResets,
+      ) ?? DEFAULT_HEARTBEAT_MIN_TURNS_BETWEEN_RESETS,
+    maxInputTokensPerTurn:
+      normalizePositiveInt(heartbeat?.maxInputTokensPerTurn ?? defaults?.maxInputTokensPerTurn) ??
+      DEFAULT_HEARTBEAT_MAX_INPUT_TOKENS_PER_TURN,
+  };
+}
+
+function normalizePromptForHash(prompt: string): string {
+  return prompt.replace(/\s+/g, " ").trim();
+}
+
+function hashHeartbeatPrompt(prompt: string): string {
+  return crypto.createHash("sha256").update(normalizePromptForHash(prompt)).digest("hex");
+}
+
+function estimateTextTokens(text: string): number {
+  // Conservative heuristic for mixed text/tool prompts.
+  return Math.ceil(text.length / 4);
+}
+
+function truncateCarryForward(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (trimmed.length <= HEARTBEAT_CARRY_FORWARD_MAX_CHARS) {
+    return trimmed;
+  }
+  const head = Math.floor(HEARTBEAT_CARRY_FORWARD_MAX_CHARS * 0.7);
+  const tail = Math.max(0, HEARTBEAT_CARRY_FORWARD_MAX_CHARS - head - 64);
+  return `${trimmed.slice(0, head)}\n\n[...truncated...]\n\n${trimmed.slice(-tail)}`;
+}
+
+function buildHeartbeatCarryForwardSummary(params: {
+  previousEntry?: {
+    totalTokens?: number;
+    contextTokens?: number;
+    lastHeartbeatText?: string;
+    modelProvider?: string;
+    model?: string;
+  };
+  reason: string;
+}): string {
+  const lines: string[] = [`Heartbeat session reset reason: ${params.reason}.`];
+  const total = params.previousEntry?.totalTokens ?? 0;
+  const ctx = params.previousEntry?.contextTokens ?? 0;
+  if (total > 0 && ctx > 0) {
+    lines.push(`Previous context usage: ${total}/${ctx} tokens.`);
+  }
+  const modelProvider = params.previousEntry?.modelProvider?.trim();
+  const model = params.previousEntry?.model?.trim();
+  if (modelProvider && model) {
+    lines.push(`Previous runtime model: ${modelProvider}/${model}.`);
+  }
+  const last = params.previousEntry?.lastHeartbeatText?.trim();
+  if (last) {
+    lines.push("Last delivered heartbeat alert:");
+    lines.push(last);
+  }
+  return truncateCarryForward(lines.join("\n"));
+}
+
+function appendHeartbeatCarryForward(prompt: string, summary?: string): string {
+  const carry = summary?.trim();
+  if (!carry) {
+    return prompt;
+  }
+  return `${prompt}\n\n[Carry-forward summary from reset]\n${carry}\n[End carry-forward summary]`;
+}
+
+async function resetHeartbeatSession(params: {
+  storePath: string;
+  sessionKey: string;
+  entry:
+    | {
+        sessionId: string;
+        totalTokens?: number;
+        contextTokens?: number;
+        lastHeartbeatText?: string;
+        modelProvider?: string;
+        model?: string;
+      }
+    | undefined;
+  agentId: string;
+  reason: string;
+}): Promise<
+  | {
+      sessionId: string;
+      sessionFile?: string;
+      heartbeatCarryForwardSummary?: string;
+      heartbeatTurnsSinceReset?: number;
+      heartbeatPromptHash?: string;
+      heartbeatPromptHashRepeats?: number;
+      heartbeatOverBudgetStreak?: number;
+      updatedAt?: number;
+    }
+  | undefined
+> {
+  const existing = params.entry;
+  if (!existing) {
+    return undefined;
+  }
+  const now = Date.now();
+  const nextSessionId = crypto.randomUUID();
+  const nextSessionFile = resolveSessionTranscriptPath(nextSessionId, params.agentId);
+  const carrySummary = buildHeartbeatCarryForwardSummary({
+    previousEntry: existing,
+    reason: params.reason,
+  });
+
+  await updateSessionStore(params.storePath, (store) => {
+    const current = store[params.sessionKey];
+    if (!current) {
+      return;
+    }
+    store[params.sessionKey] = {
+      ...current,
+      sessionId: nextSessionId,
+      sessionFile: nextSessionFile,
+      updatedAt: now,
+      systemSent: false,
+      abortedLastRun: false,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      compactionCount: 0,
+      memoryFlushAt: undefined,
+      memoryFlushCompactionCount: undefined,
+      heartbeatPromptHash: undefined,
+      heartbeatPromptHashRepeats: 0,
+      heartbeatOverBudgetStreak: 0,
+      heartbeatTurnsSinceReset: 0,
+      heartbeatResetAt: now,
+      heartbeatResetReason: params.reason,
+      heartbeatCarryForwardSummary: carrySummary || undefined,
+    };
+  });
+
+  const store = loadSessionStore(params.storePath);
+  return store[params.sessionKey];
+}
+
+async function persistHeartbeatRuntimeState(params: {
+  storePath: string;
+  sessionKey: string;
+  promptHash: string;
+  promptHashRepeats: number;
+  overBudgetStreak: number;
+}): Promise<void> {
+  await updateSessionStore(params.storePath, (store) => {
+    const current = store[params.sessionKey];
+    if (!current) {
+      return;
+    }
+    store[params.sessionKey] = {
+      ...current,
+      heartbeatPromptHash: params.promptHash,
+      heartbeatPromptHashRepeats: Math.max(1, params.promptHashRepeats),
+      heartbeatOverBudgetStreak: Math.max(0, params.overBudgetStreak),
+      heartbeatTurnsSinceReset: Math.max(0, (current.heartbeatTurnsSinceReset ?? 0) + 1),
+    };
+  });
+}
+
+async function clearHeartbeatCarryForwardSummary(params: {
+  storePath: string;
+  sessionKey: string;
+}): Promise<void> {
+  await updateSessionStore(params.storePath, (store) => {
+    const current = store[params.sessionKey];
+    if (!current?.heartbeatCarryForwardSummary) {
+      return;
+    }
+    store[params.sessionKey] = {
+      ...current,
+      heartbeatCarryForwardSummary: undefined,
+    };
+  });
+}
 
 function resolveActiveHoursTimezone(cfg: OpenClawConfig, raw?: string): string {
   const trimmed = raw?.trim();
@@ -576,11 +808,9 @@ export async function runHeartbeatOnce(opts: {
     // The LLM prompt says "if it exists" so this is expected behavior.
   }
 
-  const { entry, sessionKey, storePath, mainSessionKey, mainEntry } = resolveHeartbeatSession(
-    cfg,
-    agentId,
-    heartbeat,
-  );
+  const sessionResolution = resolveHeartbeatSession(cfg, agentId, heartbeat);
+  const { sessionKey, storePath, mainSessionKey, mainEntry } = sessionResolution;
+  let entry = sessionResolution.entry;
   const previousUpdatedAt = entry?.updatedAt;
   const delivery = resolveHeartbeatDeliveryTarget({ cfg, entry, heartbeat });
   const heartbeatAccountId = heartbeat?.accountId?.trim();
@@ -644,6 +874,113 @@ export async function runHeartbeatOnce(opts: {
       // Best-effort only. Heartbeats should still run even if transcript parsing fails.
     }
   }
+
+  const heartbeatBudget = resolveHeartbeatRuntimeBudget(cfg, heartbeat);
+  if (entry?.heartbeatCarryForwardSummary) {
+    prompt = appendHeartbeatCarryForward(prompt, entry.heartbeatCarryForwardSummary);
+  }
+
+  const promptHash = hashHeartbeatPrompt(prompt);
+  const promptHashRepeats =
+    entry?.heartbeatPromptHash === promptHash ? (entry?.heartbeatPromptHashRepeats ?? 0) + 1 : 1;
+  const estimatedPromptTokens = estimateTextTokens(prompt);
+  const priorInputTokens = entry?.inputTokens ?? 0;
+  const overBudgetStreak =
+    priorInputTokens > heartbeatBudget.maxInputTokensPerTurn
+      ? (entry?.heartbeatOverBudgetStreak ?? 0) + 1
+      : 0;
+  const utilizationRatio = (() => {
+    const total = entry?.totalTokens ?? 0;
+    const ctxTokens = entry?.contextTokens ?? 0;
+    return ctxTokens > 0 && total > 0 ? total / ctxTokens : 0;
+  })();
+  const turnsSinceReset = entry?.heartbeatTurnsSinceReset ?? Number.MAX_SAFE_INTEGER;
+  const canReset = turnsSinceReset >= heartbeatBudget.minTurnsBetweenResets;
+  const shouldGuardRepeat =
+    estimatedPromptTokens > HEARTBEAT_REPEAT_GUARD_INPUT_TOKENS &&
+    promptHashRepeats >= HEARTBEAT_REPEAT_GUARD_REPEAT_LIMIT;
+  const metricsRunId = `heartbeat:${sessionKey}:${startedAt}`;
+  if (promptHashRepeats > 1) {
+    emitAgentEvent({
+      runId: metricsRunId,
+      stream: "metrics",
+      sessionKey,
+      data: {
+        metric: "prompt.hash.repeat",
+        value: promptHashRepeats,
+        estimatedInputTokens: estimatedPromptTokens,
+        hashPrefix: promptHash.slice(0, 12),
+      },
+    });
+  }
+  const resetReason = (() => {
+    if (!canReset) {
+      return undefined;
+    }
+    if (utilizationRatio >= heartbeatBudget.resetThresholdPct) {
+      return `context-threshold:${utilizationRatio.toFixed(3)}`;
+    }
+    if (overBudgetStreak >= 2) {
+      return `over-budget-streak:${overBudgetStreak}`;
+    }
+    if (estimatedPromptTokens > heartbeatBudget.maxInputTokensPerTurn) {
+      return `estimated-input-over-budget:${estimatedPromptTokens}`;
+    }
+    if (shouldGuardRepeat) {
+      return `oversized-repeat:${promptHashRepeats}`;
+    }
+    return undefined;
+  })();
+
+  if (resetReason && entry) {
+    const resetResult = await resetHeartbeatSession({
+      storePath,
+      sessionKey,
+      entry,
+      agentId,
+      reason: resetReason,
+    });
+    if (resetResult) {
+      entry = {
+        ...entry,
+        ...resetResult,
+      };
+      prompt = appendHeartbeatCarryForward(prompt, resetResult.heartbeatCarryForwardSummary);
+      log.info("heartbeat: auto-reset session before run", {
+        sessionKey,
+        reason: resetReason,
+        estimatedPromptTokens,
+        utilizationRatio,
+        priorInputTokens,
+      });
+      emitAgentEvent({
+        runId: metricsRunId,
+        stream: "metrics",
+        sessionKey,
+        data: {
+          metric: "heartbeat.reset.count",
+          value: 1,
+          reason: resetReason,
+        },
+      });
+      emitHeartbeatEvent({
+        status: "skipped",
+        reason: `auto-reset:${resetReason}`,
+        durationMs: Date.now() - startedAt,
+        channel: delivery.channel !== "none" ? delivery.channel : undefined,
+        accountId: delivery.accountId,
+      });
+    }
+  }
+
+  await persistHeartbeatRuntimeState({
+    storePath,
+    sessionKey,
+    promptHash: hashHeartbeatPrompt(prompt),
+    promptHashRepeats: resetReason ? 1 : promptHashRepeats,
+    overBudgetStreak: resetReason ? 0 : overBudgetStreak,
+  });
+
   const ctx = {
     Body: prompt,
     From: sender,
@@ -694,6 +1031,7 @@ export async function runHeartbeatOnce(opts: {
 
   try {
     const replyResult = await getReplyFromConfig(ctx, { isHeartbeat: true }, cfg);
+    await clearHeartbeatCarryForwardSummary({ storePath, sessionKey });
     const replyPayload = resolveHeartbeatReplyPayload(replyResult);
     const includeReasoning = heartbeat?.includeReasoning === true;
     const reasoningPayloads = includeReasoning
