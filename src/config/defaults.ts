@@ -369,7 +369,19 @@ export function applyContextPruningDefaults(cfg: OpenClawConfig): OpenClawConfig
     nextDefaults.contextPruning = {
       ...contextPruning,
       mode: "cache-ttl",
+      providersMode: defaults.contextPruning?.providersMode ?? "all",
       ttl: defaults.contextPruning?.ttl ?? "1h",
+    };
+    mutated = true;
+  }
+
+  if (
+    defaults.contextPruning?.mode === "cache-ttl" &&
+    defaults.contextPruning?.providersMode === undefined
+  ) {
+    nextDefaults.contextPruning = {
+      ...contextPruning,
+      providersMode: "all",
     };
     mutated = true;
   }

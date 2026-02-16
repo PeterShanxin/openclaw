@@ -8,21 +8,86 @@ import { makeMissingToolResult, sanitizeToolCallInputs } from "./session-transcr
 const GUARD_TRUNCATION_SUFFIX =
   "\n\n⚠️ [Content truncated during persistence — original exceeded size limit. " +
   "Use offset/limit parameters or request specific sections for large content.]";
+const DEFAULT_READ_TOOL_RESULT_CHARS = 12_000;
+const DEFAULT_EXEC_TOOL_RESULT_CHARS = 8_000;
 
 /**
  * Truncate oversized text content blocks in a tool result message.
  * Returns the original message if under the limit, or a new message with
  * truncated text blocks otherwise.
  */
-function capToolResultSize(msg: AgentMessage): AgentMessage {
+function truncateHeadTail(text: string, maxChars: number): string {
+  if (text.length <= maxChars) {
+    return text;
+  }
+  if (maxChars <= GUARD_TRUNCATION_SUFFIX.length + 16) {
+    return `${text.slice(0, Math.max(0, maxChars - GUARD_TRUNCATION_SUFFIX.length))}${GUARD_TRUNCATION_SUFFIX}`;
+  }
+  const available = maxChars - GUARD_TRUNCATION_SUFFIX.length;
+  const headChars = Math.max(1, Math.floor(available * 0.6));
+  const tailChars = Math.max(1, available - headChars);
+  return `${text.slice(0, headChars)}${GUARD_TRUNCATION_SUFFIX}${text.slice(-tailChars)}`;
+}
+
+type ToolOutputBudget = {
+  readChars?: number;
+  execChars?: number;
+};
+
+type ToolResultCapResult = {
+  message: AgentMessage;
+  truncated: boolean;
+  originalChars: number;
+  includedChars: number;
+  budgetChars: number;
+};
+
+function resolveToolResultBudget(toolName: string | undefined, budget?: ToolOutputBudget): number {
+  const normalized = toolName?.trim().toLowerCase();
+  if (normalized === "read") {
+    const configured = budget?.readChars;
+    if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
+      return Math.min(HARD_MAX_TOOL_RESULT_CHARS, Math.floor(configured));
+    }
+    return DEFAULT_READ_TOOL_RESULT_CHARS;
+  }
+  if (normalized === "exec") {
+    const configured = budget?.execChars;
+    if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
+      return Math.min(HARD_MAX_TOOL_RESULT_CHARS, Math.floor(configured));
+    }
+    return DEFAULT_EXEC_TOOL_RESULT_CHARS;
+  }
+  return HARD_MAX_TOOL_RESULT_CHARS;
+}
+
+function capToolResultSize(
+  msg: AgentMessage,
+  toolName: string | undefined,
+  budget?: ToolOutputBudget,
+): ToolResultCapResult {
   const role = (msg as { role?: string }).role;
   if (role !== "toolResult") {
-    return msg;
+    return {
+      message: msg,
+      truncated: false,
+      originalChars: 0,
+      includedChars: 0,
+      budgetChars: HARD_MAX_TOOL_RESULT_CHARS,
+    };
   }
   const content = (msg as { content?: unknown }).content;
   if (!Array.isArray(content)) {
-    return msg;
+    return {
+      message: msg,
+      truncated: false,
+      originalChars: 0,
+      includedChars: 0,
+      budgetChars: HARD_MAX_TOOL_RESULT_CHARS,
+    };
   }
+
+  const budgetChars = resolveToolResultBudget(toolName, budget);
 
   // Calculate total text size
   let totalTextChars = 0;
@@ -35,11 +100,19 @@ function capToolResultSize(msg: AgentMessage): AgentMessage {
     }
   }
 
-  if (totalTextChars <= HARD_MAX_TOOL_RESULT_CHARS) {
-    return msg;
+  if (totalTextChars <= budgetChars) {
+    return {
+      message: msg,
+      truncated: false,
+      originalChars: totalTextChars,
+      includedChars: totalTextChars,
+      budgetChars,
+    };
   }
 
   // Truncate proportionally
+  let includedChars = 0;
+  let didTruncate = false;
   const newContent = content.map((block: unknown) => {
     if (!block || typeof block !== "object" || (block as { type?: string }).type !== "text") {
       return block;
@@ -49,26 +122,25 @@ function capToolResultSize(msg: AgentMessage): AgentMessage {
       return block;
     }
     const blockShare = textBlock.text.length / totalTextChars;
-    const blockBudget = Math.max(
-      2_000,
-      Math.floor(HARD_MAX_TOOL_RESULT_CHARS * blockShare) - GUARD_TRUNCATION_SUFFIX.length,
-    );
-    if (textBlock.text.length <= blockBudget) {
-      return block;
+    const blockBudget = Math.max(128, Math.floor(budgetChars * blockShare));
+    const nextText = truncateHeadTail(textBlock.text, blockBudget);
+    if (nextText.length < textBlock.text.length) {
+      didTruncate = true;
     }
-    // Try to cut at a newline boundary
-    let cutPoint = blockBudget;
-    const lastNewline = textBlock.text.lastIndexOf("\n", blockBudget);
-    if (lastNewline > blockBudget * 0.8) {
-      cutPoint = lastNewline;
-    }
+    includedChars += nextText.length;
     return {
       ...textBlock,
-      text: textBlock.text.slice(0, cutPoint) + GUARD_TRUNCATION_SUFFIX,
+      text: nextText,
     };
   });
 
-  return { ...msg, content: newContent } as AgentMessage;
+  return {
+    message: { ...msg, content: newContent } as AgentMessage,
+    truncated: didTruncate,
+    originalChars: totalTextChars,
+    includedChars: includedChars || budgetChars,
+    budgetChars,
+  };
 }
 
 type ToolCall = { id: string; name?: string };
@@ -126,6 +198,15 @@ export function installSessionToolResultGuard(
      * Defaults to true.
      */
     allowSyntheticToolResults?: boolean;
+    /** Optional tool-specific char budgets for persisted tool results. */
+    toolOutputBudget?: ToolOutputBudget;
+    /** Optional callback for tool-output truncation telemetry. */
+    onToolResultTruncated?: (event: {
+      toolName?: string;
+      originalChars: number;
+      includedChars: number;
+      budgetChars: number;
+    }) => void;
   },
 ): {
   flushPendingToolResults: () => void;
@@ -186,9 +267,17 @@ export function installSessionToolResultGuard(
       }
       // Apply hard size cap before persistence to prevent oversized tool results
       // from consuming the entire context window on subsequent LLM calls.
-      const capped = capToolResultSize(nextMessage);
+      const capped = capToolResultSize(nextMessage, toolName, opts?.toolOutputBudget);
+      if (capped.truncated) {
+        opts?.onToolResultTruncated?.({
+          toolName,
+          originalChars: capped.originalChars,
+          includedChars: capped.includedChars,
+          budgetChars: capped.budgetChars,
+        });
+      }
       return originalAppend(
-        persistToolResult(capped, {
+        persistToolResult(capped.message, {
           toolCallId: id ?? undefined,
           toolName,
           isSynthetic: false,

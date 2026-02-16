@@ -7,6 +7,7 @@ import type { FollowupRun } from "./queue.js";
 import { resolveAgentModelFallbacksOverride } from "../../agents/agent-scope.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
 import { isCliProvider } from "../../agents/model-selection.js";
+import { compactEmbeddedPiSession } from "../../agents/pi-embedded-runner/compact.js";
 import { runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
 import { resolveSandboxConfigForAgent, resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
 import {
@@ -17,8 +18,9 @@ import {
 import { logVerbose } from "../../globals.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
 import { buildThreadingToolContext, resolveEnforceFinalTag } from "./agent-runner-utils.js";
-import { compactEmbeddedPiSession } from "../../agents/pi-embedded-runner/compact.js";
 import {
+  resolveHeartbeatMaxInputTokens,
+  resolveHeartbeatProactiveCompactionThreshold,
   resolveMemoryFlushContextWindowTokens,
   resolveMemoryFlushSettings,
   shouldRunMemoryFlush,
@@ -60,9 +62,10 @@ export async function runMemoryFlushIfNeeded(params: {
     return sandboxCfg.workspaceAccess === "rw";
   })();
 
-  // Allow memory flush during heartbeats when context usage is critically high (>= 90%).
+  // Allow memory flush during heartbeats when context usage is high.
   // Normally heartbeats are excluded to save tokens, but at critical levels we must compact
   // proactively to avoid hitting the context limit and causing silent API failures.
+  const heartbeatThreshold = resolveHeartbeatProactiveCompactionThreshold(params.cfg);
   const allowHeartbeatFlush =
     params.isHeartbeat &&
     (() => {
@@ -71,7 +74,7 @@ export async function runMemoryFlushIfNeeded(params: {
         (params.sessionKey ? params.sessionStore?.[params.sessionKey] : undefined);
       const total = entry?.totalTokens ?? 0;
       const ctx = entry?.contextTokens ?? 0;
-      return ctx > 0 && total > 0 && total / ctx >= 0.9;
+      return ctx > 0 && total > 0 && total / ctx >= heartbeatThreshold;
     })();
 
   const shouldFlushMemory =
@@ -84,6 +87,8 @@ export async function runMemoryFlushIfNeeded(params: {
         params.sessionEntry ??
         (params.sessionKey ? params.sessionStore?.[params.sessionKey] : undefined),
       contextWindowTokens: resolveMemoryFlushContextWindowTokens({
+        cfg: params.cfg,
+        provider: params.followupRun.run.provider,
         modelId: params.followupRun.run.model ?? params.defaultModel,
         agentCfgContextTokens: params.agentCfgContextTokens,
       }),
@@ -241,26 +246,25 @@ export async function runProactiveCompactionIfNeeded(params: {
     (params.sessionKey ? params.sessionStore?.[params.sessionKey] : undefined);
 
   const contextWindowTokens = resolveMemoryFlushContextWindowTokens({
+    cfg: params.cfg,
+    provider: params.followupRun.run.provider,
     modelId: params.followupRun.run.model ?? params.defaultModel,
     agentCfgContextTokens: params.agentCfgContextTokens,
   });
 
-  if (
-    !shouldRunProactiveCompaction({
-      entry,
-      contextWindowTokens,
-    })
-  ) {
-    return params.sessionEntry;
-  }
+  const heartbeatThresholdRatio = resolveHeartbeatProactiveCompactionThreshold(params.cfg);
+  const heartbeatMaxInputTokens = resolveHeartbeatMaxInputTokens(params.cfg);
+  const forceForOversizedHeartbeat =
+    params.isHeartbeat && (entry?.inputTokens ?? 0) >= heartbeatMaxInputTokens;
 
-  // Skip during heartbeats unless context is critically high (>= 95%).
-  if (params.isHeartbeat) {
-    const total = entry?.totalTokens ?? 0;
-    const ctx = entry?.contextTokens ?? contextWindowTokens;
-    if (ctx <= 0 || total / ctx < 0.95) {
-      return params.sessionEntry;
-    }
+  const shouldCompactForUtilization = shouldRunProactiveCompaction({
+    entry,
+    contextWindowTokens,
+    thresholdRatio: params.isHeartbeat ? heartbeatThresholdRatio : undefined,
+  });
+
+  if (!forceForOversizedHeartbeat && !shouldCompactForUtilization) {
+    return params.sessionEntry;
   }
 
   // Skip for CLI providers (they manage their own context).
@@ -269,8 +273,11 @@ export async function runProactiveCompactionIfNeeded(params: {
   }
 
   const run = params.followupRun.run;
+  const forcedSuffix = forceForOversizedHeartbeat
+    ? ` (forced by prior inputTokens=${entry?.inputTokens ?? 0} >= maxHeartbeatInputTokens=${heartbeatMaxInputTokens})`
+    : "";
   logVerbose(
-    `proactive compaction: context at ${entry?.totalTokens}/${entry?.contextTokens ?? contextWindowTokens} tokens — attempting compaction`,
+    `proactive compaction: context at ${entry?.totalTokens}/${entry?.contextTokens ?? contextWindowTokens} tokens — attempting compaction${forcedSuffix}`,
   );
 
   try {

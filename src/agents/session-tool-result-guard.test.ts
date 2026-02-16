@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { installSessionToolResultGuard } from "./session-tool-result-guard.js";
 
 type AppendMessage = Parameters<SessionManager["appendMessage"]>[0];
@@ -268,5 +268,60 @@ describe("installSessionToolResultGuard", () => {
       text: string;
     };
     expect(textBlock.text).toBe(originalText);
+  });
+
+  it("applies read/exec budgets and emits truncation telemetry", () => {
+    const sm = SessionManager.inMemory();
+    const onToolResultTruncated = vi.fn();
+    installSessionToolResultGuard(sm, { onToolResultTruncated });
+
+    sm.appendMessage(
+      asAppendMessage({
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: "read_call", name: "read", arguments: {} },
+          { type: "toolCall", id: "exec_call", name: "exec", arguments: {} },
+        ],
+      }),
+    );
+    sm.appendMessage(
+      asAppendMessage({
+        role: "toolResult",
+        toolCallId: "read_call",
+        content: [{ type: "text", text: "r".repeat(100_000) }],
+      }),
+    );
+    sm.appendMessage(
+      asAppendMessage({
+        role: "toolResult",
+        toolCallId: "exec_call",
+        content: [{ type: "text", text: "e".repeat(100_000) }],
+      }),
+    );
+
+    const messages = sm
+      .getEntries()
+      .filter((e) => e.type === "message")
+      .map((e) => (e as { message: AgentMessage }).message);
+    const readResult = messages.find(
+      (m) => m.role === "toolResult" && (m as { toolCallId?: string }).toolCallId === "read_call",
+    ) as { content: Array<{ type: string; text: string }> };
+    const execResult = messages.find(
+      (m) => m.role === "toolResult" && (m as { toolCallId?: string }).toolCallId === "exec_call",
+    ) as { content: Array<{ type: string; text: string }> };
+    const readText = readResult.content.find((b) => b.type === "text")?.text ?? "";
+    const execText = execResult.content.find((b) => b.type === "text")?.text ?? "";
+
+    expect(readText.length).toBeLessThanOrEqual(12_000);
+    expect(execText.length).toBeLessThanOrEqual(8_000);
+    expect(onToolResultTruncated).toHaveBeenCalledTimes(2);
+    expect(onToolResultTruncated.mock.calls[0]?.[0]).toMatchObject({
+      toolName: "read",
+      budgetChars: 12_000,
+    });
+    expect(onToolResultTruncated.mock.calls[1]?.[0]).toMatchObject({
+      toolName: "exec",
+      budgetChars: 8_000,
+    });
   });
 });

@@ -6,7 +6,7 @@ import {
   resolveDefaultAgentId,
   resolveSessionAgentId,
 } from "../../agents/agent-scope.js";
-import { lookupContextTokens } from "../../agents/context.js";
+import { resolveContextWindowInfo } from "../../agents/context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import {
   buildModelAliasIndex,
@@ -219,7 +219,12 @@ export async function persistInlineDirectives(params: {
   return {
     provider,
     model,
-    contextTokens: agentCfg?.contextTokens ?? lookupContextTokens(model) ?? DEFAULT_CONTEXT_TOKENS,
+    contextTokens: resolveContextWindowInfo({
+      cfg,
+      provider,
+      modelId: model,
+      defaultTokens: DEFAULT_CONTEXT_TOKENS,
+    }).tokens,
   };
 }
 

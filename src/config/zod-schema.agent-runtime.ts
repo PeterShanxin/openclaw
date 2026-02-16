@@ -27,6 +27,9 @@ export const HeartbeatSchema = z
     accountId: z.string().optional(),
     prompt: z.string().optional(),
     ackMaxChars: z.number().int().nonnegative().optional(),
+    resetThresholdPct: z.number().min(0.1).max(0.99).optional(),
+    minTurnsBetweenResets: z.number().int().nonnegative().optional(),
+    maxInputTokensPerTurn: z.number().int().positive().optional(),
   })
   .strict()
   .superRefine((val, ctx) => {

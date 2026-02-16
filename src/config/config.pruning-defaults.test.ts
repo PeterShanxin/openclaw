@@ -63,6 +63,7 @@ describe("config pruning defaults", () => {
 
       expect(cfg.agents?.defaults?.contextPruning?.mode).toBe("cache-ttl");
       expect(cfg.agents?.defaults?.contextPruning?.ttl).toBe("1h");
+      expect(cfg.agents?.defaults?.contextPruning?.providersMode).toBe("all");
       expect(cfg.agents?.defaults?.heartbeat?.every).toBe("1h");
     });
   });
@@ -98,6 +99,7 @@ describe("config pruning defaults", () => {
 
       expect(cfg.agents?.defaults?.contextPruning?.mode).toBe("cache-ttl");
       expect(cfg.agents?.defaults?.contextPruning?.ttl).toBe("1h");
+      expect(cfg.agents?.defaults?.contextPruning?.providersMode).toBe("all");
       expect(cfg.agents?.defaults?.heartbeat?.every).toBe("30m");
       expect(
         cfg.agents?.defaults?.models?.["anthropic/claude-opus-4-5"]?.params?.cacheRetention,

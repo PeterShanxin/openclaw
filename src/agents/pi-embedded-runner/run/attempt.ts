@@ -451,6 +451,19 @@ export async function runEmbeddedAttempt(
         agentId: sessionAgentId,
         sessionKey: params.sessionKey,
         allowSyntheticToolResults: transcriptPolicy.allowSyntheticToolResults,
+        toolOutputBudget: params.config?.agents?.defaults?.toolOutputBudget,
+        onToolResultTruncated: (event) => {
+          params.onAgentEvent?.({
+            stream: "metrics",
+            data: {
+              metric: "tool.output.truncated",
+              tool: event.toolName,
+              originalChars: event.originalChars,
+              includedChars: event.includedChars,
+              budgetChars: event.budgetChars,
+            },
+          });
+        },
       });
       trackSessionManagerAccess(params.sessionFile);
 
@@ -937,7 +950,11 @@ export async function runEmbeddedAttempt(
 
           const shouldTrackCacheTtl =
             params.config?.agents?.defaults?.contextPruning?.mode === "cache-ttl" &&
-            isCacheTtlEligibleProvider(params.provider, params.modelId);
+            isCacheTtlEligibleProvider(
+              params.provider,
+              params.modelId,
+              params.config?.agents?.defaults?.contextPruning,
+            );
           if (shouldTrackCacheTtl) {
             appendCacheTtlTimestamp(sessionManager, {
               timestamp: Date.now(),
@@ -1030,6 +1047,31 @@ export async function runEmbeddedAttempt(
             typeof entry.toolName === "string" && entry.toolName.trim().length > 0,
         )
         .map((entry) => ({ toolName: entry.toolName, meta: entry.meta }));
+      const usageTotals = getUsageTotals();
+      if (params.onAgentEvent) {
+        const metrics: Array<{
+          metric: "token.input" | "token.output" | "token.cache_read";
+          value: number;
+        }> = [
+          { metric: "token.input", value: usageTotals.input ?? 0 },
+          { metric: "token.output", value: usageTotals.output ?? 0 },
+          { metric: "token.cache_read", value: usageTotals.cacheRead ?? 0 },
+        ];
+        for (const metric of metrics) {
+          if (!Number.isFinite(metric.value) || metric.value <= 0) {
+            continue;
+          }
+          params.onAgentEvent({
+            stream: "metrics",
+            data: {
+              metric: metric.metric,
+              value: metric.value,
+              provider: params.provider,
+              model: params.modelId,
+            },
+          });
+        }
+      }
 
       return {
         aborted,
@@ -1049,7 +1091,7 @@ export async function runEmbeddedAttempt(
         cloudCodeAssistFormatError: Boolean(
           lastAssistant?.errorMessage && isCloudCodeAssistFormatError(lastAssistant.errorMessage),
         ),
-        attemptUsage: getUsageTotals(),
+        attemptUsage: usageTotals,
         compactionCount: getCompactionCount(),
         // Client tool call detected (OpenResponses hosted tools)
         clientToolCall: clientToolCallDetected ?? undefined,
