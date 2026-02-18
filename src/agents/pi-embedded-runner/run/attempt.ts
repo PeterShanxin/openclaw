@@ -60,7 +60,6 @@ import {
   acquireSessionWriteLock,
   resolveSessionLockMaxHoldFromTimeout,
 } from "../../session-write-lock.js";
-import { resolveAgentStreamIdleTimeoutMs } from "../../timeout.js";
 import { detectRuntimeShell } from "../../shell-utils.js";
 import {
   applySkillEnvOverrides,
@@ -70,6 +69,7 @@ import {
 } from "../../skills.js";
 import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { buildSystemPromptReport } from "../../system-prompt-report.js";
+import { resolveAgentStreamIdleTimeoutMs } from "../../timeout.js";
 import { resolveTranscriptPolicy } from "../../transcript-policy.js";
 import { DEFAULT_BOOTSTRAP_FILENAME } from "../../workspace.js";
 import { isRunnerAbortError } from "../abort.js";

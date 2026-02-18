@@ -594,6 +594,7 @@ describe("runEmbeddedPiAgent", () => {
     sessionManager.appendMessage({
       role: "user",
       content: [{ type: "text", text: "orphaned user turn" }],
+      timestamp: Date.now(),
     });
 
     const cfg = {
@@ -631,6 +632,7 @@ describe("runEmbeddedPiAgent", () => {
       model: "mock-claude",
       timeoutMs: 5_000,
       agentDir,
+      runId: "run:test",
       enqueue: immediateEnqueue,
     });
 

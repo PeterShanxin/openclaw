@@ -754,8 +754,8 @@ export async function runEmbeddedPiAgent(
             const errorText = describeUnknownError(promptError);
             // Log unrecognized prompt errors for diagnostic purposes.
             // Helps identify provider-specific error formats (e.g. GLM context overflow)
-            // that don't match existing isContextOverflowError() patterns.
-            if (!isContextOverflowError(errorText)) {
+            // that don't match existing overflow classification patterns.
+            if (!isLikelyContextOverflowError(errorText)) {
               log.warn(
                 `[prompt-error-diag] provider=${provider}/${modelId} ` +
                   `session=${redactedSessionKey} ` +

@@ -24,7 +24,7 @@ vi.mock("@mariozechner/pi-ai", async () => {
 
   const buildAbortMessage = (model: { api: string; provider: string; id: string }) => ({
     role: "assistant" as const,
-    content: [] as const,
+    content: [],
     stopReason: "aborted" as const,
     errorMessage: "mock stream aborted",
     api: model.api,
@@ -61,7 +61,7 @@ vi.mock("@mariozechner/pi-ai", async () => {
       options?: { signal?: AbortSignal },
     ) => {
       streamSimpleCalls += 1;
-      const stream = new actual.AssistantMessageEventStream();
+      const stream = actual.createAssistantMessageEventStream();
       const signal = options?.signal;
       if (signal) {
         const onAbort = () => {

@@ -48,8 +48,8 @@ import {
   isCronSystemEvent,
   isExecCompletionEvent,
 } from "./heartbeat-events-filter.js";
-import { buildHeartbeatMainSessionContext } from "./heartbeat-main-context.js";
 import { emitHeartbeatEvent, resolveIndicatorType } from "./heartbeat-events.js";
+import { buildHeartbeatMainSessionContext } from "./heartbeat-main-context.js";
 import { resolveHeartbeatVisibility } from "./heartbeat-visibility.js";
 import {
   type HeartbeatRunResult,
