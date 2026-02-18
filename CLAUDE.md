@@ -78,6 +78,18 @@ sudo -iu openclaw env OPENCLAW_STATE_DIR=/var/lib/openclaw OPENCLAW_WORKSPACE_DI
   openclaw browser status
 ```
 
+72h token usage report (agent-aware):
+
+```bash
+cd /opt/meowmoltbot/openclaw
+OPENCLAW_STATE_DIR=/var/lib/openclaw OPENCLAW_WORKSPACE_DIR=/var/lib/openclaw/workspace OPENCLAW_CONFIG_PATH=/var/lib/openclaw/openclaw.json \
+  pnpm -s usage:report:72h
+
+# single agent
+OPENCLAW_STATE_DIR=/var/lib/openclaw OPENCLAW_WORKSPACE_DIR=/var/lib/openclaw/workspace OPENCLAW_CONFIG_PATH=/var/lib/openclaw/openclaw.json \
+  pnpm -s usage:report:72h -- --agent nova
+```
+
 If you need secrets from `/etc/openclaw/moltbot.env` (root `0600`) for a one-off CLI command:
 
 ```bash
@@ -119,6 +131,12 @@ sudo systemctl restart openclaw-gateway.service
 node /opt/meowmoltbot/scripts/cloud/patch-openclaw-json-for-linux.mjs /var/lib/openclaw/openclaw.json
 sudo systemctl restart openclaw-gateway.service
 ```
+
+### Current Runtime Guardrails (Nova)
+
+- Heartbeat cadence is `2h` (`agents.defaults.heartbeat.every`).
+- Telegram runs with `streamMode: "off"` and `blockStreaming: false` to avoid multi-message progress floods.
+- Token burn protections are active (heartbeat reset thresholds, tool output budgets, provider-wide context pruning).
 
 ## Model / Provider Notes (High Level)
 
@@ -167,4 +185,3 @@ sudo chmod 700 /var/lib/openclaw
 ## Legacy (Windows + Docker)
 
 This repo originally documented a Windows Docker host deployment. The production system is now VM + systemd; Docker/PowerShell materials are legacy only.
-
