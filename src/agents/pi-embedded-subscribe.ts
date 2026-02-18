@@ -3,10 +3,13 @@ import type {
   EmbeddedPiSubscribeContext,
   EmbeddedPiSubscribeState,
 } from "./pi-embedded-subscribe.handlers.types.js";
+import type { MessagingToolSend } from "./pi-embedded-messaging.js";
 import type { SubscribeEmbeddedPiSessionParams } from "./pi-embedded-subscribe.types.js";
 import { parseReplyDirectives } from "../auto-reply/reply/reply-directives.js";
 import { createStreamingDirectiveAccumulator } from "../auto-reply/reply/streaming-directives.js";
 import { formatToolAggregate } from "../auto-reply/tool-meta.js";
+import { normalizeChannelId } from "../channels/plugins/index.js";
+import { normalizeTargetForProvider } from "../infra/outbound/target-normalization.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { buildCodeSpanIndex, createInlineCodeState } from "../markdown/code-spans.js";
 import { EmbeddedBlockChunker } from "./pi-embedded-block-chunker.js";
@@ -67,6 +70,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     messagingToolSentTexts: [],
     messagingToolSentTextsNormalized: [],
     messagingToolSentTargets: [],
+    suppressRepliesAfterMessagingSend: false,
     pendingMessagingTexts: new Map(),
     pendingMessagingTargets: new Map(),
   };
@@ -88,6 +92,44 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
   const messagingToolSentTargets = state.messagingToolSentTargets;
   const pendingMessagingTexts = state.pendingMessagingTexts;
   const pendingMessagingTargets = state.pendingMessagingTargets;
+  const normalizeAccountId = (value?: string): string | undefined => {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed.toLowerCase() : undefined;
+  };
+  const currentMessagingTarget: MessagingToolSend | undefined = (() => {
+    const providerRaw = params.messageProvider?.trim();
+    const providerNormalized = providerRaw ? normalizeChannelId(providerRaw) ?? providerRaw : "";
+    if (!providerNormalized) {
+      return undefined;
+    }
+    const targetNormalized = normalizeTargetForProvider(providerNormalized, params.messageTarget);
+    if (!targetNormalized) {
+      return undefined;
+    }
+    return {
+      tool: "origin",
+      provider: providerNormalized,
+      accountId: params.messageAccountId,
+      to: targetNormalized,
+    };
+  })();
+  const isCurrentMessagingTarget = (target: MessagingToolSend) => {
+    if (!currentMessagingTarget?.provider || !currentMessagingTarget.to) {
+      return false;
+    }
+    if (target.provider !== currentMessagingTarget.provider) {
+      return false;
+    }
+    if (target.to !== currentMessagingTarget.to) {
+      return false;
+    }
+    const currentAccountId = normalizeAccountId(currentMessagingTarget.accountId);
+    const targetAccountId = normalizeAccountId(target.accountId);
+    if (currentAccountId && targetAccountId && currentAccountId !== targetAccountId) {
+      return false;
+    }
+    return true;
+  };
   const replyDirectiveAccumulator = createStreamingDirectiveAccumulator();
   const partialReplyDirectiveAccumulator = createStreamingDirectiveAccumulator();
 
@@ -296,6 +338,9 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     if (!params.onToolResult) {
       return;
     }
+    if (state.suppressRepliesAfterMessagingSend) {
+      return;
+    }
     const agg = formatToolAggregate(toolName, meta ? [meta] : undefined, {
       markdown: useMarkdown,
     });
@@ -314,6 +359,9 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
   };
   const emitToolOutput = (toolName?: string, meta?: string, output?: string) => {
     if (!params.onToolResult || !output) {
+      return;
+    }
+    if (state.suppressRepliesAfterMessagingSend) {
       return;
     }
     const agg = formatToolAggregate(toolName, meta ? [meta] : undefined, {
@@ -448,6 +496,9 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     if (state.suppressBlockChunks) {
       return;
     }
+    if (state.suppressRepliesAfterMessagingSend) {
+      return;
+    }
     // Strip <think> and <final> blocks across chunk boundaries to avoid leaking reasoning.
     const chunk = stripBlockTags(text, state.blockState).trimEnd();
     if (!chunk) {
@@ -460,7 +511,10 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     // Only check committed (successful) messaging tool texts - checking pending texts
     // is risky because if the tool fails after suppression, the user gets no response
     const normalizedChunk = normalizeTextForComparison(chunk);
-    if (isMessagingToolDuplicateNormalized(normalizedChunk, messagingToolSentTextsNormalized)) {
+    if (
+      state.suppressRepliesAfterMessagingSend &&
+      isMessagingToolDuplicateNormalized(normalizedChunk, messagingToolSentTextsNormalized)
+    ) {
       log.debug(`Skipping block reply - already sent via messaging tool: ${chunk.slice(0, 50)}...`);
       return;
     }
@@ -547,6 +601,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     messagingToolSentTexts.length = 0;
     messagingToolSentTextsNormalized.length = 0;
     messagingToolSentTargets.length = 0;
+    state.suppressRepliesAfterMessagingSend = false;
     pendingMessagingTexts.clear();
     pendingMessagingTargets.clear();
     resetAssistantMessageState(0);
@@ -568,6 +623,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     emitReasoningStream,
     consumeReplyDirectives,
     consumePartialReplyDirectives,
+    isCurrentMessagingTarget,
     resetAssistantMessageState,
     resetForCompactionRetry,
     finalizeAssistantTexts,

@@ -164,7 +164,11 @@ export function handleMessageUpdate(
         },
       });
       ctx.state.emittedAssistantUpdate = true;
-      if (ctx.params.onPartialReply && ctx.state.shouldEmitPartialReplies) {
+      if (
+        ctx.params.onPartialReply &&
+        ctx.state.shouldEmitPartialReplies &&
+        !ctx.state.suppressRepliesAfterMessagingSend
+      ) {
         void ctx.params.onPartialReply({
           text: cleanedText,
           mediaUrls: hasMedia ? mediaUrls : undefined,
@@ -265,6 +269,7 @@ export function handleMessageEnd(
     ctx.state.includeReasoning &&
     formattedReasoning &&
     onBlockReply &&
+    !ctx.state.suppressRepliesAfterMessagingSend &&
     formattedReasoning !== ctx.state.lastReasoningSent,
   );
   const shouldEmitReasoningBeforeAnswer =
@@ -285,7 +290,8 @@ export function handleMessageEnd(
     (ctx.state.blockReplyBreak === "message_end" ||
       (ctx.blockChunker ? ctx.blockChunker.hasBuffered() : ctx.state.blockBuffer.length > 0)) &&
     text &&
-    onBlockReply
+    onBlockReply &&
+    !ctx.state.suppressRepliesAfterMessagingSend
   ) {
     if (ctx.blockChunker?.hasBuffered()) {
       ctx.blockChunker.drain({ force: true, emit: ctx.emitBlockChunk });
@@ -294,6 +300,7 @@ export function handleMessageEnd(
       // Check for duplicates before emitting (same logic as emitBlockChunk).
       const normalizedText = normalizeTextForComparison(text);
       if (
+        ctx.state.suppressRepliesAfterMessagingSend &&
         isMessagingToolDuplicateNormalized(
           normalizedText,
           ctx.state.messagingToolSentTextsNormalized,
@@ -337,7 +344,11 @@ export function handleMessageEnd(
     ctx.emitReasoningStream(rawThinking);
   }
 
-  if (ctx.state.blockReplyBreak === "text_end" && onBlockReply) {
+  if (
+    ctx.state.blockReplyBreak === "text_end" &&
+    onBlockReply &&
+    !ctx.state.suppressRepliesAfterMessagingSend
+  ) {
     const tailResult = ctx.consumeReplyDirectives("", { final: true });
     if (tailResult) {
       const {

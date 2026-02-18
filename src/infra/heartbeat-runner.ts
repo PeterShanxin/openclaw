@@ -889,6 +889,8 @@ export async function runHeartbeatOnce(opts: {
     priorInputTokens > heartbeatBudget.maxInputTokensPerTurn
       ? (entry?.heartbeatOverBudgetStreak ?? 0) + 1
       : 0;
+  const metricProvider = entry?.modelProvider?.trim() || undefined;
+  const metricModel = entry?.model?.trim() || undefined;
   const utilizationRatio = (() => {
     const total = entry?.totalTokens ?? 0;
     const ctxTokens = entry?.contextTokens ?? 0;
@@ -897,7 +899,7 @@ export async function runHeartbeatOnce(opts: {
   const turnsSinceReset = entry?.heartbeatTurnsSinceReset ?? Number.MAX_SAFE_INTEGER;
   const canReset = turnsSinceReset >= heartbeatBudget.minTurnsBetweenResets;
   const shouldGuardRepeat =
-    estimatedPromptTokens > HEARTBEAT_REPEAT_GUARD_INPUT_TOKENS &&
+    priorInputTokens > HEARTBEAT_REPEAT_GUARD_INPUT_TOKENS &&
     promptHashRepeats >= HEARTBEAT_REPEAT_GUARD_REPEAT_LIMIT;
   const metricsRunId = `heartbeat:${sessionKey}:${startedAt}`;
   if (promptHashRepeats > 1) {
@@ -908,6 +910,11 @@ export async function runHeartbeatOnce(opts: {
       data: {
         metric: "prompt.hash.repeat",
         value: promptHashRepeats,
+        agentId,
+        sessionKey,
+        provider: metricProvider,
+        model: metricModel,
+        priorInputTokens,
         estimatedInputTokens: estimatedPromptTokens,
         hashPrefix: promptHash.slice(0, 12),
       },
@@ -960,6 +967,10 @@ export async function runHeartbeatOnce(opts: {
         data: {
           metric: "heartbeat.reset.count",
           value: 1,
+          agentId,
+          sessionKey,
+          provider: metricProvider,
+          model: metricModel,
           reason: resetReason,
         },
       });

@@ -7,6 +7,12 @@ export type ToolResultFormat = "markdown" | "plain";
 export type SubscribeEmbeddedPiSessionParams = {
   session: AgentSession;
   runId: string;
+  /** Current outbound provider/channel for this run (for post-send duplicate suppression). */
+  messageProvider?: string;
+  /** Current outbound target for this run (for post-send duplicate suppression). */
+  messageTarget?: string;
+  /** Current outbound account for this run (for post-send duplicate suppression). */
+  messageAccountId?: string;
   verboseLevel?: VerboseLevel;
   reasoningMode?: ReasoningLevel;
   toolResultFormat?: ToolResultFormat;
