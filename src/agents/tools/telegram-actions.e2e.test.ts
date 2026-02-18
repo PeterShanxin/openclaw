@@ -704,7 +704,12 @@ describe("handleTelegramAction per-account gating", () => {
         },
         cfg,
       ),
-    ).rejects.toThrow(/reactions are disabled via actions.reactions/i);
+    ).resolves.toMatchObject({
+      details: {
+        ok: false,
+        reason: "disabled",
+      },
+    });
   });
 
   it("allows account to explicitly re-enable top-level disabled reaction gate", async () => {

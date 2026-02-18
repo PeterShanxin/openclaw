@@ -597,7 +597,9 @@ export async function runEmbeddedPiAgent(
                 `diagId=${overflowDiagId} compactionAttempts=${overflowCompactionAttempts} ` +
                 `error=${errorText.slice(0, 200)}`,
             );
-            const isCompactionFailure = isCompactionFailureError(errorText);
+            const isCompactionFailure =
+              isCompactionFailureError(errorText) ||
+              /summarization failed|auto-compaction|compaction failed/i.test(errorText);
             const hadAttemptLevelCompaction = attemptCompactionCount > 0;
             // If this attempt already compacted (SDK auto-compaction), avoid immediately
             // running another explicit compaction for the same overflow trigger.
@@ -656,13 +658,13 @@ export async function runEmbeddedPiAgent(
                 attempt: overflowCompactionAttempts,
                 maxAttempts: MAX_OVERFLOW_COMPACTION_ATTEMPTS,
               });
-              if (compactResult.compacted) {
+              if (compactResult?.compacted) {
                 autoCompactionCount += 1;
                 log.info(`auto-compaction succeeded for ${provider}/${modelId}; retrying prompt`);
                 continue;
               }
               log.warn(
-                `auto-compaction failed for ${provider}/${modelId}: ${compactResult.reason ?? "nothing to compact"}`,
+                `auto-compaction failed for ${provider}/${modelId}: ${compactResult?.reason ?? "nothing to compact"}`,
               );
             }
             // Fallback: try truncating oversized tool results in the session.
