@@ -569,9 +569,11 @@ export const registerTelegramNativeCommands = ({
           });
 
           const disableBlockStreaming =
-            typeof telegramCfg.blockStreaming === "boolean"
-              ? !telegramCfg.blockStreaming
-              : undefined;
+            telegramCfg.streamMode === "off"
+              ? true
+              : typeof telegramCfg.blockStreaming === "boolean"
+                ? !telegramCfg.blockStreaming
+                : undefined;
           const chunkMode = resolveChunkMode(cfg, "telegram", route.accountId);
 
           const deliveryState = {

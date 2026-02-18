@@ -457,6 +457,10 @@ export async function runEmbeddedAttempt(
             stream: "metrics",
             data: {
               metric: "tool.output.truncated",
+              agentId: sessionAgentId,
+              sessionKey: params.sessionKey,
+              provider: params.provider,
+              model: params.modelId,
               tool: event.toolName,
               originalChars: event.originalChars,
               includedChars: event.includedChars,
@@ -785,6 +789,9 @@ export async function runEmbeddedAttempt(
       const subscription = subscribeEmbeddedPiSession({
         session: activeSession,
         runId: params.runId,
+        messageProvider: params.messageChannel ?? params.messageProvider,
+        messageTarget: params.messageTo,
+        messageAccountId: params.agentAccountId,
         verboseLevel: params.verboseLevel,
         reasoningMode: params.reasoningLevel ?? "off",
         toolResultFormat: params.toolResultFormat,
@@ -1066,6 +1073,8 @@ export async function runEmbeddedAttempt(
             data: {
               metric: metric.metric,
               value: metric.value,
+              agentId: sessionAgentId,
+              sessionKey: params.sessionKey,
               provider: params.provider,
               model: params.modelId,
             },

@@ -190,6 +190,9 @@ export function handleToolExecutionEnd(
     if (!isToolError) {
       ctx.state.messagingToolSentTargets.push(pendingTarget);
       ctx.trimMessagingToolSent();
+      if (ctx.isCurrentMessagingTarget(pendingTarget)) {
+        ctx.state.suppressRepliesAfterMessagingSend = true;
+      }
     }
   }
 

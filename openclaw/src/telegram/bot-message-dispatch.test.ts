@@ -137,6 +137,8 @@ describe("dispatchTelegramMessage draft streaming", () => {
       resolveBotTopicsEnabled: vi.fn().mockResolvedValue(false),
     });
 
+    const callArgs = dispatchReplyWithBufferedBlockDispatcher.mock.calls[0]?.[0];
+    expect(callArgs?.replyOptions?.disableBlockStreaming).toBe(true);
     expect(deliverReplies).toHaveBeenCalledTimes(2);
     const coalesced = deliverReplies.mock.calls[0]?.[0]?.replies?.[0]?.text ?? "";
     expect(coalesced).toContain("🛠️ Exec: `ls`");
