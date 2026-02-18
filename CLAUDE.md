@@ -20,6 +20,10 @@ Canonical VM layout:
 - Chromium profile dir: `/var/lib/openclaw/chrome-profile`
 - systemd env (secrets, root-owned `0600`): `/etc/openclaw/moltbot.env`
 
+Repo layout policy:
+- `openclaw/` is kept as a normal tracked directory (single-repo clone), not a git submodule.
+- Sync with fork via `git subtree` helpers in `scripts/openclaw-subtree.sh`.
+
 Compatibility:
 - `/home/node/.openclaw` is a symlink to `/var/lib/openclaw` to keep older paths working.
 
@@ -131,6 +135,24 @@ sudo systemctl restart openclaw-gateway.service
 node /opt/meowmoltbot/scripts/cloud/patch-openclaw-json-for-linux.mjs /var/lib/openclaw/openclaw.json
 sudo systemctl restart openclaw-gateway.service
 ```
+
+### Sync Embedded `openclaw/` with Fork
+
+Use the subtree helper from repo root (`/opt/meowmoltbot`):
+
+```bash
+# pull from fork into openclaw/
+scripts/openclaw-subtree.sh pull
+
+# pull with compact history
+scripts/openclaw-subtree.sh pull --squash
+
+# push local openclaw/ changes to fork
+scripts/openclaw-subtree.sh push
+```
+
+Default remote alias is `openclaw-fork` (`https://github.com/PeterShanxin/openclaw.git`).
+See `OPENCLAW_SUBTREE_WORKFLOW.md` for full details.
 
 ### Current Runtime Guardrails (Nova)
 
