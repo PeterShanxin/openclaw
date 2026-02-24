@@ -160,6 +160,17 @@ See `OPENCLAW_SUBTREE_WORKFLOW.md` for full details.
 - Telegram runs with `streamMode: "off"` and `blockStreaming: false` to avoid multi-message progress floods.
 - Token burn protections are active (heartbeat reset thresholds, tool output budgets, provider-wide context pruning).
 
+#### OOM Guardrails (Hard Constraint)
+
+- Do not OOM the droplet: prefer the smallest possible command that answers the question.
+- Avoid heavy defaults: do **not** run `pnpm tsgo` or full `pnpm test` unless explicitly required.
+- Prefer targeted validation:
+  - Single test file: `pnpm vitest run <path/to/file.test.ts>`
+  - Small subset: `pnpm vitest run -t "<test name>"`
+- If broader test coverage is required, run low-memory/low-parallel modes first:
+  - `OPENCLAW_TEST_PROFILE=low OPENCLAW_TEST_SERIAL_GATEWAY=1 pnpm test`
+  - Optionally cap Node memory: `NODE_OPTIONS=--max-old-space-size=4096 pnpm test`
+
 ## Model / Provider Notes (High Level)
 
 - Default LLM is configured in `/var/lib/openclaw/openclaw.json`.
