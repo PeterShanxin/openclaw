@@ -10,6 +10,7 @@ import {
   resolveConfiguredModelRef,
   resolveModelRefFromString,
 } from "../../agents/model-selection.js";
+import { formatProviderNameForDisplay } from "../../agents/model-display.js";
 import {
   buildModelsKeyboard,
   buildProviderKeyboard,
@@ -117,7 +118,11 @@ export async function buildModelsProviderData(cfg: OpenClawConfig): Promise<Mode
 }
 
 function formatProviderLine(params: { provider: string; count: number }): string {
-  return `- ${params.provider} (${params.count})`;
+  const name = formatProviderNameForDisplay(params.provider) ?? params.provider;
+  if (name !== params.provider) {
+    return `- ${name} (${params.provider}) (${params.count})`;
+  }
+  return `- ${name} (${params.count})`;
 }
 
 function parseModelsArgs(raw: string): {
@@ -193,6 +198,15 @@ export async function resolveModelsCommandReply(params: {
 
   const { byProvider, providers } = await buildModelsProviderData(params.cfg);
   const isTelegram = params.surface === "telegram";
+  const resolveProviderInput = (rawProvider: string) => {
+    if (byProvider.has(rawProvider)) {
+      return rawProvider;
+    }
+    if (rawProvider === "openai" && !byProvider.has("openai") && byProvider.has("openai-codex")) {
+      return "openai-codex";
+    }
+    return rawProvider;
+  };
 
   // Provider list (no provider specified)
   if (!provider) {
@@ -201,6 +215,7 @@ export async function resolveModelsCommandReply(params: {
       const providerInfos: ProviderInfo[] = providers.map((p) => ({
         id: p,
         count: byProvider.get(p)?.size ?? 0,
+        label: formatProviderNameForDisplay(p) ?? p,
       }));
       const buttons = buildProviderKeyboard(providerInfos);
       const text = "Select a provider:";
@@ -223,24 +238,30 @@ export async function resolveModelsCommandReply(params: {
     return { text: lines.join("\n") };
   }
 
-  if (!byProvider.has(provider)) {
+  const selectedProvider = resolveProviderInput(provider);
+
+  if (!byProvider.has(selectedProvider)) {
     const lines: string[] = [
       `Unknown provider: ${provider}`,
       "",
       "Available providers:",
-      ...providers.map((p) => `- ${p}`),
+      ...providers.map((p) => formatProviderLine({ provider: p, count: byProvider.get(p)?.size ?? 0 })),
       "",
       "Use: /models <provider>",
     ];
+    if (provider === "openai" && byProvider.has("openai-codex")) {
+      lines.push("Tip: OpenAI Codex OAuth provider id is openai-codex.");
+    }
     return { text: lines.join("\n") };
   }
 
-  const models = [...(byProvider.get(provider) ?? new Set<string>())].toSorted();
+  const models = [...(byProvider.get(selectedProvider) ?? new Set<string>())].toSorted();
   const total = models.length;
+  const providerName = formatProviderNameForDisplay(selectedProvider) ?? selectedProvider;
 
   if (total === 0) {
     const lines: string[] = [
-      `Models (${provider}) — none`,
+      `Models (${providerName}) — none`,
       "",
       "Browse: /models",
       "Switch: /model <provider/model>",
@@ -255,7 +276,7 @@ export async function resolveModelsCommandReply(params: {
     const safePage = Math.max(1, Math.min(page, totalPages));
 
     const buttons = buildModelsKeyboard({
-      provider,
+      provider: selectedProvider,
       models,
       currentModel: params.currentModel,
       currentPage: safePage,
@@ -263,7 +284,7 @@ export async function resolveModelsCommandReply(params: {
       pageSize: telegramPageSize,
     });
 
-    const text = `Models (${provider}) — ${total} available`;
+    const text = `Models (${providerName}) — ${total} available`;
     return {
       text,
       channelData: { telegram: { buttons } },
@@ -279,8 +300,8 @@ export async function resolveModelsCommandReply(params: {
     const lines: string[] = [
       `Page out of range: ${page} (valid: 1-${pageCount})`,
       "",
-      `Try: /models ${provider} ${safePage}`,
-      `All: /models ${provider} all`,
+      `Try: /models ${selectedProvider} ${safePage}`,
+      `All: /models ${selectedProvider} all`,
     ];
     return { text: lines.join("\n") };
   }
@@ -289,19 +310,19 @@ export async function resolveModelsCommandReply(params: {
   const endIndexExclusive = Math.min(total, startIndex + effectivePageSize);
   const pageModels = models.slice(startIndex, endIndexExclusive);
 
-  const header = `Models (${provider}) — showing ${startIndex + 1}-${endIndexExclusive} of ${total} (page ${safePage}/${pageCount})`;
+  const header = `Models (${providerName}) — showing ${startIndex + 1}-${endIndexExclusive} of ${total} (page ${safePage}/${pageCount})`;
 
   const lines: string[] = [header];
   for (const id of pageModels) {
-    lines.push(`- ${provider}/${id}`);
+    lines.push(`- ${selectedProvider}/${id}`);
   }
 
   lines.push("", "Switch: /model <provider/model>");
   if (!all && safePage < pageCount) {
-    lines.push(`More: /models ${provider} ${safePage + 1}`);
+    lines.push(`More: /models ${selectedProvider} ${safePage + 1}`);
   }
   if (!all) {
-    lines.push(`All: /models ${provider} all`);
+    lines.push(`All: /models ${selectedProvider} all`);
   }
 
   const payload: ReplyPayload = { text: lines.join("\n") };

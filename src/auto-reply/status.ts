@@ -33,6 +33,7 @@ import {
   formatUsd,
   resolveModelCostConfig,
 } from "../utils/usage-format.js";
+import { formatModelRefForDisplay } from "../agents/model-display.js";
 import { VERSION } from "../version.js";
 import {
   listChatCommands,
@@ -252,7 +253,7 @@ const formatMediaUnderstandingLine = (decisions?: MediaUnderstandingDecision[]) 
         const chosen = decision.attachments.find((entry) => entry.chosen)?.chosen;
         const provider = chosen?.provider?.trim();
         const model = chosen?.model?.trim();
-        const modelLabel = provider ? (model ? `${provider}/${model}` : provider) : null;
+        const modelLabel = formatModelRefForDisplay({ provider, model });
         return `${decision.capability}${countLabel} ok${modelLabel ? ` (${modelLabel})` : ""}`;
       }
       if (decision.outcome === "no-attachment") {
@@ -437,7 +438,9 @@ export function buildStatusMessage(args: StatusArgs): string {
       : undefined;
   const costLabel = showCost && hasUsage ? formatUsd(cost) : undefined;
 
-  const modelLabel = model ? `${provider}/${model}` : "unknown";
+  const modelLabel = model
+    ? (formatModelRefForDisplay({ provider, model }) ?? `${provider}/${model}`)
+    : "unknown";
   const authLabel = authLabelValue ? ` · 🔑 ${authLabelValue}` : "";
   const modelLine = `🧠 Model: ${modelLabel}${authLabel}`;
   const commit = resolveCommitHash();

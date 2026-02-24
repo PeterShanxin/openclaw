@@ -19,6 +19,7 @@ export type ParsedModelCallback =
 export type ProviderInfo = {
   id: string;
   count: number;
+  label?: string;
 };
 
 export type ModelsKeyboardParams = {
@@ -89,7 +90,7 @@ export function buildProviderKeyboard(providers: ProviderInfo[]): ButtonRow[] {
 
   for (const provider of providers) {
     const button = {
-      text: `${provider.id} (${provider.count})`,
+      text: `${provider.label ?? provider.id} (${provider.count})`,
       callback_data: `mdl_list_${provider.id}_1`,
     };
 
