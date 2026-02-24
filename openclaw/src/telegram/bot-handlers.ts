@@ -12,6 +12,7 @@ import { buildModelsProviderData } from "../auto-reply/reply/commands-models.js"
 import { resolveStoredModelOverride } from "../auto-reply/reply/model-selection.js";
 import { listSkillCommandsForAgents } from "../auto-reply/skill-commands.js";
 import { buildCommandsMessagePaginated } from "../auto-reply/status.js";
+import { formatProviderNameForDisplay } from "../agents/model-display.js";
 import { resolveChannelConfigWrites } from "../channels/plugins/config-writes.js";
 import { loadConfig } from "../config/config.js";
 import { writeConfigFile } from "../config/io.js";
@@ -518,6 +519,7 @@ export const registerTelegramHandlers = ({
           const providerInfos: ProviderInfo[] = providers.map((p) => ({
             id: p,
             count: byProvider.get(p)?.size ?? 0,
+            label: formatProviderNameForDisplay(p) ?? p,
           }));
           const buttons = buildProviderKeyboard(providerInfos);
           await editMessageWithButtons("Select a provider:", buttons);
@@ -532,6 +534,7 @@ export const registerTelegramHandlers = ({
             const providerInfos: ProviderInfo[] = providers.map((p) => ({
               id: p,
               count: byProvider.get(p)?.size ?? 0,
+              label: formatProviderNameForDisplay(p) ?? p,
             }));
             const buttons = buildProviderKeyboard(providerInfos);
             await editMessageWithButtons(
@@ -562,7 +565,8 @@ export const registerTelegramHandlers = ({
             totalPages,
             pageSize,
           });
-          const text = `Models (${provider}) — ${models.length} available`;
+          const providerName = formatProviderNameForDisplay(provider) ?? provider;
+          const text = `Models (${providerName}) — ${models.length} available`;
           await editMessageWithButtons(text, buttons);
           return;
         }

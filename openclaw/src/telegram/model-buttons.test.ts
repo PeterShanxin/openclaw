@@ -80,6 +80,13 @@ describe("buildProviderKeyboard", () => {
     expect(result[0]?.[0]?.callback_data).toBe("mdl_list_anthropic_1");
   });
 
+  it("prefers provider label when provided", () => {
+    const providers: ProviderInfo[] = [{ id: "openai-codex", label: "OpenAI", count: 2 }];
+    const result = buildProviderKeyboard(providers);
+    expect(result[0]?.[0]?.text).toBe("OpenAI (2)");
+    expect(result[0]?.[0]?.callback_data).toBe("mdl_list_openai-codex_1");
+  });
+
   it("builds two providers per row", () => {
     const providers: ProviderInfo[] = [
       { id: "anthropic", count: 5 },

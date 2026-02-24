@@ -244,6 +244,26 @@ describe("buildStatusMessage", () => {
     expect(normalizeTestText(text)).toContain("Model: google-antigravity/claude-sonnet-4-5");
   });
 
+  it("normalizes openai-codex provider label in status output", () => {
+    const text = buildStatusMessage({
+      agent: {
+        model: "openai-codex/gpt-5.2",
+      },
+      sessionEntry: {
+        sessionId: "codex-status-1",
+        updatedAt: 0,
+        providerOverride: "openai-codex",
+        modelOverride: "gpt-5.2",
+      },
+      sessionScope: "per-sender",
+      queue: { mode: "collect", depth: 0 },
+    });
+
+    const normalized = normalizeTestText(text);
+    expect(normalized).toContain("Model: openai/gpt-5.2");
+    expect(normalized).not.toContain("Model: openai-codex/gpt-5.2");
+  });
+
   it("handles missing agent config gracefully", () => {
     const text = buildStatusMessage({
       agent: {},

@@ -242,4 +242,31 @@ describe("/models command", () => {
     expect(result.reply?.text).toContain("localai/ultra-chat");
     expect(result.reply?.text).not.toContain("Unknown provider");
   });
+
+  it("shows OpenAI label for openai-codex provider", async () => {
+    const codexCfg = {
+      commands: { text: true },
+      agents: { defaults: { model: { primary: "openai-codex/gpt-5.2" } } },
+    } as unknown as OpenClawConfig;
+
+    const providerList = await handleCommands(buildParams("/models", codexCfg, { Surface: "discord" }));
+    expect(providerList.reply?.text).toContain("OpenAI (openai-codex)");
+  });
+
+  it("accepts /models openai when only openai-codex is configured", async () => {
+    const codexCfg = {
+      commands: { text: true },
+      agents: {
+        defaults: {
+          model: { primary: "openai-codex/gpt-5.2" },
+          models: { "openai-codex/gpt-5.2": { alias: "gpt5" } },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    const result = await handleCommands(buildParams("/models openai", codexCfg, { Surface: "discord" }));
+    expect(result.reply?.text).toContain("Models (OpenAI)");
+    expect(result.reply?.text).toContain("openai-codex/gpt-5.2");
+    expect(result.reply?.text).not.toContain("Unknown provider");
+  });
 });
