@@ -395,11 +395,15 @@ export async function resolveReplyDirectives(params: {
   provider = modelState.provider;
   model = modelState.model;
 
+  const modelContextWindow = modelState.allowedModelCatalog.find(
+    (entry) => entry.provider === provider && entry.id === model,
+  )?.contextWindow;
   let contextTokens = resolveContextTokens({
     cfg,
     agentCfg,
     provider,
     model,
+    modelContextWindow,
   });
 
   const initialModelLabel = `${provider}/${model}`;

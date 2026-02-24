@@ -37,6 +37,7 @@ export async function persistInlineDirectives(params: {
   defaultModel: string;
   aliasIndex: ModelAliasIndex;
   allowedModelKeys: Set<string>;
+  allowedModelCatalog?: Array<{ provider: string; id: string; contextWindow?: number }>;
   provider: string;
   model: string;
   initialModelLabel: string;
@@ -223,6 +224,9 @@ export async function persistInlineDirectives(params: {
       cfg,
       provider,
       modelId: model,
+      modelContextWindow: params.allowedModelCatalog?.find(
+        (entry) => entry.provider === provider && entry.id === model,
+      )?.contextWindow,
       defaultTokens: DEFAULT_CONTEXT_TOKENS,
     }).tokens,
   };
