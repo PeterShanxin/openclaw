@@ -12,6 +12,15 @@ Runtime stack:
 - **OpenClaw Gateway** (systemd): loopback only `ws://127.0.0.1:18789`
 - **Headless Chromium (CDP)** (systemd): loopback only `http://127.0.0.1:9222`
 
+## Access (Tailscale SSH)
+
+Primary connection method:
+- `ssh my-droplet-ts` (Tailscale IP `100.111.134.54`)
+
+Notes:
+- Inbound firewall is closed; connect over Tailscale.
+- Password SSH is disabled.
+
 Canonical VM layout:
 - Ops repo (docs/templates/scripts): `/opt/meowmoltbot`
 - OpenClaw source/build (fork): `/opt/meowmoltbot/openclaw`
