@@ -579,11 +579,13 @@ export function resolveContextTokens(params: {
   agentCfg: NonNullable<NonNullable<OpenClawConfig["agents"]>["defaults"]> | undefined;
   provider: string;
   model: string;
+  modelContextWindow?: number;
 }): number {
   const info = resolveContextWindowInfo({
     cfg: params.cfg,
     provider: params.provider,
     modelId: params.model,
+    modelContextWindow: params.modelContextWindow,
     defaultTokens: DEFAULT_CONTEXT_TOKENS,
   });
   const agentCap = params.agentCfg?.contextTokens;

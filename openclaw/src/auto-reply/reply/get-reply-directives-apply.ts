@@ -280,6 +280,7 @@ export async function applyInlineDirectiveOverrides(params: {
     defaultModel,
     aliasIndex,
     allowedModelKeys: modelState.allowedModelKeys,
+    allowedModelCatalog: modelState.allowedModelCatalog,
     provider,
     model,
     initialModelLabel,
