@@ -653,6 +653,10 @@ export function classifyFailoverReason(raw: string): FailoverReason | null {
   if (isAuthErrorMessage(raw)) {
     return "auth";
   }
+  // HTTP 5xx server errors (e.g. 520, 502, 503) should trigger model rotation
+  if (/\b5[0-9][0-9]\b/.test(raw)) {
+    return "rate_limit";
+  }
   return null;
 }
 
