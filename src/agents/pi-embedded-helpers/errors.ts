@@ -654,7 +654,8 @@ export function classifyFailoverReason(raw: string): FailoverReason | null {
     return "auth";
   }
   // HTTP 5xx server errors (e.g. 520, 502, 503) should trigger model rotation
-  if (/\b5[0-9][0-9]\b/.test(raw)) {
+  // Also catch MiniMax "unknown error, NNN (1000)" with non-standard codes (e.g. 798)
+  if (/\b5[0-9][0-9]\b/.test(raw) || /\bunknown error\b/i.test(raw)) {
     return "rate_limit";
   }
   return null;
