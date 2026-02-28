@@ -85,6 +85,9 @@ export function readTelegramButtons(
 export async function handleTelegramAction(
   params: Record<string, unknown>,
   cfg: OpenClawConfig,
+  options?: {
+    mediaLocalRoots?: readonly string[];
+  },
 ): Promise<AgentToolResult<unknown>> {
   const action = readStringParam(params, "action", { required: true });
   const accountId = readStringParam(params, "accountId");
@@ -92,8 +95,8 @@ export async function handleTelegramAction(
 
   if (action === "react") {
     // All react failures return soft results (jsonResult with ok:false) instead
-    // of throwing, because hard tool errors cause Gemini Flash to re-generate
-    // the entire preceding response as duplicate content.
+    // of throwing, because hard tool errors can trigger model re-generation
+    // loops and duplicate content.
     const reactionLevelInfo = resolveTelegramReactionLevel({
       cfg,
       accountId: accountId ?? undefined,
@@ -116,9 +119,15 @@ export async function handleTelegramAction(
       required: true,
     });
     const messageId = readNumberParam(params, "messageId", {
-      required: true,
       integer: true,
     });
+    if (typeof messageId !== "number" || !Number.isFinite(messageId) || messageId <= 0) {
+      return jsonResult({
+        ok: false,
+        reason: "missing_message_id",
+        hint: "Telegram reaction requires a valid messageId (or inbound context fallback). Do not retry.",
+      });
+    }
     const { emoji, remove, isEmpty } = readReactionParams(params, {
       removeErrorMessage: "Emoji is required to remove a Telegram reaction.",
     });
@@ -144,7 +153,7 @@ export async function handleTelegramAction(
         reason: isInvalid ? "REACTION_INVALID" : "error",
         emoji,
         hint: isInvalid
-          ? "This emoji is not supported for Telegram reactions. Add it to your reaction disallow list so you don't try it again."
+          ? "This emoji is not supported for Telegram reactions. Add it to your reaction disallow list so you do not try it again."
           : "Reaction failed. Do not retry.",
       });
     }
@@ -219,6 +228,7 @@ export async function handleTelegramAction(
       token,
       accountId: accountId ?? undefined,
       mediaUrl: mediaUrl || undefined,
+      mediaLocalRoots: options?.mediaLocalRoots,
       buttons,
       replyToMessageId: replyToMessageId ?? undefined,
       messageThreadId: messageThreadId ?? undefined,

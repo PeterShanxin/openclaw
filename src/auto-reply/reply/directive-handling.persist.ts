@@ -3,7 +3,7 @@ import {
   resolveDefaultAgentId,
   resolveSessionAgentId,
 } from "../../agents/agent-scope.js";
-import { lookupContextTokens } from "../../agents/context.js";
+import { resolveContextWindowInfo } from "../../agents/context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import {
   buildModelAliasIndex,
@@ -37,6 +37,7 @@ export async function persistInlineDirectives(params: {
   defaultModel: string;
   aliasIndex: ModelAliasIndex;
   allowedModelKeys: Set<string>;
+  allowedModelCatalog?: Array<{ provider: string; id: string; contextWindow?: number }>;
   provider: string;
   model: string;
   initialModelLabel: string;
@@ -91,7 +92,8 @@ export async function persistInlineDirectives(params: {
     }
     if (directives.hasReasoningDirective && directives.reasoningLevel) {
       if (directives.reasoningLevel === "off") {
-        delete sessionEntry.reasoningLevel;
+        // Persist explicit off so it overrides model-capability defaults.
+        sessionEntry.reasoningLevel = "off";
       } else {
         sessionEntry.reasoningLevel = directives.reasoningLevel;
       }
@@ -212,7 +214,15 @@ export async function persistInlineDirectives(params: {
   return {
     provider,
     model,
-    contextTokens: agentCfg?.contextTokens ?? lookupContextTokens(model) ?? DEFAULT_CONTEXT_TOKENS,
+    contextTokens: resolveContextWindowInfo({
+      cfg,
+      provider,
+      modelId: model,
+      modelContextWindow: params.allowedModelCatalog?.find(
+        (entry) => entry.provider === provider && entry.id === model,
+      )?.contextWindow,
+      defaultTokens: DEFAULT_CONTEXT_TOKENS,
+    }).tokens,
   };
 }
 

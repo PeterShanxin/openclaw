@@ -8,6 +8,9 @@ export type ContextPruningMode = "off" | "cache-ttl";
 
 export type ContextPruningConfig = {
   mode?: ContextPruningMode;
+  providersMode?: "all" | "allowlist";
+  allowProviders?: string[];
+  denyProviders?: string[];
   /** TTL to consider cache expired (duration string, default unit: minutes). */
   ttl?: string;
   keepLastAssistants?: number;

@@ -41,15 +41,20 @@ import { CommandLane } from "../process/lanes.js";
 import { normalizeAgentId, toAgentStoreSessionKey } from "../routing/session-key.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 import { escapeRegExp } from "../utils.js";
-import { formatErrorMessage } from "./errors.js";
+import { formatErrorMessage, hasErrnoCode } from "./errors.js";
 import { isWithinActiveHours } from "./heartbeat-active-hours.js";
 import {
+  buildExecEventPrompt,
   buildCronEventPrompt,
   isCronSystemEvent,
   isExecCompletionEvent,
 } from "./heartbeat-events-filter.js";
 import { emitHeartbeatEvent, resolveIndicatorType } from "./heartbeat-events.js";
+<<<<<<< HEAD
 import { buildHeartbeatMainSessionContext } from "./heartbeat-main-context.js";
+=======
+import { resolveHeartbeatReasonKind } from "./heartbeat-reason.js";
+>>>>>>> origin/chore/openclaw-v2026.2.26
 import { resolveHeartbeatVisibility } from "./heartbeat-visibility.js";
 import {
   type HeartbeatRunResult,
@@ -59,6 +64,7 @@ import {
 } from "./heartbeat-wake.js";
 import type { OutboundSendDeps } from "./outbound/deliver.js";
 import { deliverOutboundPayloads } from "./outbound/deliver.js";
+import { buildOutboundSessionContext } from "./outbound/session-context.js";
 import {
   resolveHeartbeatDeliveryTarget,
   resolveHeartbeatSenderContext,
@@ -95,15 +101,7 @@ export type HeartbeatSummary = {
   ackMaxChars: number;
 };
 
-const DEFAULT_HEARTBEAT_TARGET = "last";
-
-// Prompt used when an async exec has completed and the result should be relayed to the user.
-// This overrides the standard heartbeat prompt to ensure the model responds with the exec result
-// instead of just "HEARTBEAT_OK".
-const EXEC_EVENT_PROMPT =
-  "An async command you ran earlier has completed. The result is shown in the system messages above. " +
-  "Please relay the command output to the user in a helpful way. If the command succeeded, share the relevant output. " +
-  "If it failed, explain what went wrong.";
+const DEFAULT_HEARTBEAT_TARGET = "none";
 export { isCronSystemEvent };
 
 type HeartbeatAgentState = {
@@ -505,6 +503,125 @@ function normalizeHeartbeatReply(
   return { shouldSkip: false, text: finalText, hasMedia };
 }
 
+type HeartbeatReasonFlags = {
+  isExecEventReason: boolean;
+  isCronEventReason: boolean;
+  isWakeReason: boolean;
+};
+
+type HeartbeatSkipReason = "empty-heartbeat-file";
+
+type HeartbeatPreflight = HeartbeatReasonFlags & {
+  session: ReturnType<typeof resolveHeartbeatSession>;
+  pendingEventEntries: ReturnType<typeof peekSystemEventEntries>;
+  hasTaggedCronEvents: boolean;
+  shouldInspectPendingEvents: boolean;
+  skipReason?: HeartbeatSkipReason;
+};
+
+function resolveHeartbeatReasonFlags(reason?: string): HeartbeatReasonFlags {
+  const reasonKind = resolveHeartbeatReasonKind(reason);
+  return {
+    isExecEventReason: reasonKind === "exec-event",
+    isCronEventReason: reasonKind === "cron",
+    isWakeReason: reasonKind === "wake" || reasonKind === "hook",
+  };
+}
+
+async function resolveHeartbeatPreflight(params: {
+  cfg: OpenClawConfig;
+  agentId: string;
+  heartbeat?: HeartbeatConfig;
+  forcedSessionKey?: string;
+  reason?: string;
+}): Promise<HeartbeatPreflight> {
+  const reasonFlags = resolveHeartbeatReasonFlags(params.reason);
+  const session = resolveHeartbeatSession(
+    params.cfg,
+    params.agentId,
+    params.heartbeat,
+    params.forcedSessionKey,
+  );
+  const pendingEventEntries = peekSystemEventEntries(session.sessionKey);
+  const hasTaggedCronEvents = pendingEventEntries.some((event) =>
+    event.contextKey?.startsWith("cron:"),
+  );
+  const shouldInspectPendingEvents =
+    reasonFlags.isExecEventReason || reasonFlags.isCronEventReason || hasTaggedCronEvents;
+  const shouldBypassFileGates =
+    reasonFlags.isExecEventReason ||
+    reasonFlags.isCronEventReason ||
+    reasonFlags.isWakeReason ||
+    hasTaggedCronEvents;
+  const basePreflight = {
+    ...reasonFlags,
+    session,
+    pendingEventEntries,
+    hasTaggedCronEvents,
+    shouldInspectPendingEvents,
+  } satisfies Omit<HeartbeatPreflight, "skipReason">;
+
+  if (shouldBypassFileGates) {
+    return basePreflight;
+  }
+
+  const workspaceDir = resolveAgentWorkspaceDir(params.cfg, params.agentId);
+  const heartbeatFilePath = path.join(workspaceDir, DEFAULT_HEARTBEAT_FILENAME);
+  try {
+    const heartbeatFileContent = await fs.readFile(heartbeatFilePath, "utf-8");
+    if (isHeartbeatContentEffectivelyEmpty(heartbeatFileContent)) {
+      return {
+        ...basePreflight,
+        skipReason: "empty-heartbeat-file",
+      };
+    }
+  } catch (err: unknown) {
+    if (hasErrnoCode(err, "ENOENT")) {
+      // Missing HEARTBEAT.md is intentional in some setups (for example, when
+      // heartbeat instructions live outside the file), so keep the run active.
+      // The heartbeat prompt already says "if it exists".
+      return basePreflight;
+    }
+    // For other read errors, proceed with heartbeat as before.
+  }
+
+  return basePreflight;
+}
+
+type HeartbeatPromptResolution = {
+  prompt: string;
+  hasExecCompletion: boolean;
+  hasCronEvents: boolean;
+};
+
+function resolveHeartbeatRunPrompt(params: {
+  cfg: OpenClawConfig;
+  heartbeat?: HeartbeatConfig;
+  preflight: HeartbeatPreflight;
+  canRelayToUser: boolean;
+}): HeartbeatPromptResolution {
+  const pendingEventEntries = params.preflight.pendingEventEntries;
+  const pendingEvents = params.preflight.shouldInspectPendingEvents
+    ? pendingEventEntries.map((event) => event.text)
+    : [];
+  const cronEvents = pendingEventEntries
+    .filter(
+      (event) =>
+        (params.preflight.isCronEventReason || event.contextKey?.startsWith("cron:")) &&
+        isCronSystemEvent(event.text),
+    )
+    .map((event) => event.text);
+  const hasExecCompletion = pendingEvents.some(isExecCompletionEvent);
+  const hasCronEvents = cronEvents.length > 0;
+  const prompt = hasExecCompletion
+    ? buildExecEventPrompt({ deliverToUser: params.canRelayToUser })
+    : hasCronEvents
+      ? buildCronEventPrompt(cronEvents, { deliverToUser: params.canRelayToUser })
+      : resolveHeartbeatPrompt(params.cfg, params.heartbeat);
+
+  return { prompt, hasExecCompletion, hasCronEvents };
+}
+
 export async function runHeartbeatOnce(opts: {
   cfg?: OpenClawConfig;
   agentId?: string;
@@ -536,6 +653,7 @@ export async function runHeartbeatOnce(opts: {
     return { status: "skipped", reason: "requests-in-flight" };
   }
 
+<<<<<<< HEAD
   // Skip heartbeat if HEARTBEAT.md exists but has no actionable content.
   // This saves API calls/costs when the file is effectively empty (only comments/headers).
   // EXCEPTION: Don't skip for exec events, cron events, or explicit wake requests -
@@ -566,23 +684,37 @@ export async function runHeartbeatOnce(opts: {
   }
 
   const { entry, sessionKey, storePath, mainSessionKey, mainEntry } = resolveHeartbeatSession(
+=======
+  // Preflight centralizes trigger classification, event inspection, and HEARTBEAT.md gating.
+  const preflight = await resolveHeartbeatPreflight({
+>>>>>>> origin/chore/openclaw-v2026.2.26
     cfg,
     agentId,
     heartbeat,
-    opts.sessionKey,
-  );
+    forcedSessionKey: opts.sessionKey,
+    reason: opts.reason,
+  });
+  if (preflight.skipReason) {
+    emitHeartbeatEvent({
+      status: "skipped",
+      reason: preflight.skipReason,
+      durationMs: Date.now() - startedAt,
+    });
+    return { status: "skipped", reason: preflight.skipReason };
+  }
+  const { entry, sessionKey, storePath } = preflight.session;
   const previousUpdatedAt = entry?.updatedAt;
   const delivery = resolveHeartbeatDeliveryTarget({ cfg, entry, heartbeat });
   const heartbeatAccountId = heartbeat?.accountId?.trim();
   if (delivery.reason === "unknown-account") {
     log.warn("heartbeat: unknown accountId", {
       accountId: delivery.accountId ?? heartbeatAccountId ?? null,
-      target: heartbeat?.target ?? "last",
+      target: heartbeat?.target ?? "none",
     });
   } else if (heartbeatAccountId) {
     log.info("heartbeat: using explicit accountId", {
       accountId: delivery.accountId ?? heartbeatAccountId,
-      target: heartbeat?.target ?? "last",
+      target: heartbeat?.target ?? "none",
       channel: delivery.channel,
     });
   }
@@ -600,14 +732,10 @@ export async function runHeartbeatOnce(opts: {
     accountId: delivery.accountId,
   }).responsePrefix;
 
-  // Check if this is an exec event or cron event with pending system events.
-  // If so, use a specialized prompt that instructs the model to relay the result
-  // instead of the standard heartbeat prompt with "reply HEARTBEAT_OK".
-  const isExecEvent = opts.reason === "exec-event";
-  const pendingEventEntries = peekSystemEventEntries(sessionKey);
-  const hasTaggedCronEvents = pendingEventEntries.some((event) =>
-    event.contextKey?.startsWith("cron:"),
+  const canRelayToUser = Boolean(
+    delivery.channel !== "none" && delivery.to && visibility.showAlerts,
   );
+<<<<<<< HEAD
   const shouldInspectPendingEvents = isExecEvent || isCronEventReason || hasTaggedCronEvents;
   const pendingEvents = shouldInspectPendingEvents
     ? pendingEventEntries.map((event) => event.text)
@@ -646,10 +774,22 @@ export async function runHeartbeatOnce(opts: {
       // Best-effort only. Heartbeats should still run even if transcript parsing fails.
     }
   }
+=======
+  const { prompt, hasExecCompletion, hasCronEvents } = resolveHeartbeatRunPrompt({
+    cfg,
+    heartbeat,
+    preflight,
+    canRelayToUser,
+  });
+>>>>>>> origin/chore/openclaw-v2026.2.26
   const ctx = {
     Body: appendCronStyleCurrentTimeLine(prompt, cfg, startedAt),
     From: sender,
     To: sender,
+    OriginatingChannel: delivery.channel !== "none" ? delivery.channel : undefined,
+    OriginatingTo: delivery.to,
+    AccountId: delivery.accountId,
+    MessageThreadId: delivery.threadId,
     Provider: hasExecCompletion ? "exec-event" : hasCronEvents ? "cron-event" : "heartbeat",
     SessionKey: sessionKey,
   };
@@ -665,6 +805,11 @@ export async function runHeartbeatOnce(opts: {
   }
 
   const heartbeatOkText = responsePrefix ? `${responsePrefix} ${HEARTBEAT_TOKEN}` : HEARTBEAT_TOKEN;
+  const outboundSession = buildOutboundSessionContext({
+    cfg,
+    agentId,
+    sessionKey,
+  });
   const canAttemptHeartbeatOk = Boolean(
     visibility.showOk && delivery.channel !== "none" && delivery.to,
   );
@@ -690,7 +835,7 @@ export async function runHeartbeatOnce(opts: {
       accountId: delivery.accountId,
       threadId: delivery.threadId,
       payloads: [{ text: heartbeatOkText }],
-      agentId,
+      session: outboundSession,
       deps: opts.deps,
     });
     return true;
@@ -883,7 +1028,7 @@ export async function runHeartbeatOnce(opts: {
       channel: delivery.channel,
       to: delivery.to,
       accountId: deliveryAccountId,
-      agentId,
+      session: outboundSession,
       threadId: delivery.threadId,
       payloads: [
         ...reasoningPayloads,

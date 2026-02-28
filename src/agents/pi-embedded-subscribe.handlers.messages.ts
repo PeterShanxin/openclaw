@@ -21,6 +21,9 @@ import {
 const stripTrailingDirective = (text: string): string => {
   const openIndex = text.lastIndexOf("[[");
   if (openIndex < 0) {
+    if (text.endsWith("[")) {
+      return text.slice(0, -1);
+    }
     return text;
   }
   const closeIndex = text.indexOf("]]", openIndex + 2);
@@ -29,6 +32,14 @@ const stripTrailingDirective = (text: string): string => {
   }
   return text.slice(0, openIndex);
 };
+
+function emitReasoningEnd(ctx: EmbeddedPiSubscribeContext) {
+  if (!ctx.state.reasoningStreamOpen) {
+    return;
+  }
+  ctx.state.reasoningStreamOpen = false;
+  void ctx.params.onReasoningEnd?.();
+}
 
 export function resolveSilentReplyFallbackText(params: {
   text: string;
@@ -81,6 +92,36 @@ export function handleMessageUpdate(
       ? (assistantEvent as Record<string, unknown>)
       : undefined;
   const evtType = typeof assistantRecord?.type === "string" ? assistantRecord.type : "";
+
+  if (evtType === "thinking_start" || evtType === "thinking_delta" || evtType === "thinking_end") {
+    if (evtType === "thinking_start" || evtType === "thinking_delta") {
+      ctx.state.reasoningStreamOpen = true;
+    }
+    const thinkingDelta = typeof assistantRecord?.delta === "string" ? assistantRecord.delta : "";
+    const thinkingContent =
+      typeof assistantRecord?.content === "string" ? assistantRecord.content : "";
+    appendRawStream({
+      ts: Date.now(),
+      event: "assistant_thinking_stream",
+      runId: ctx.params.runId,
+      sessionId: (ctx.params.session as { id?: string }).id,
+      evtType,
+      delta: thinkingDelta,
+      content: thinkingContent,
+    });
+    if (ctx.state.streamReasoning) {
+      // Prefer full partial-message thinking when available; fall back to event payloads.
+      const partialThinking = extractAssistantThinking(msg);
+      ctx.emitReasoningStream(partialThinking || thinkingContent || thinkingDelta);
+    }
+    if (evtType === "thinking_end") {
+      if (!ctx.state.reasoningStreamOpen) {
+        ctx.state.reasoningStreamOpen = true;
+      }
+      emitReasoningEnd(ctx);
+    }
+    return;
+  }
 
   if (evtType !== "text_delta" && evtType !== "text_start" && evtType !== "text_end") {
     return;
@@ -142,9 +183,12 @@ export function handleMessageUpdate(
   if (next) {
     const wasThinking = ctx.state.partialBlockState.thinking;
     const visibleDelta = chunk ? ctx.stripBlockTags(chunk, ctx.state.partialBlockState) : "";
+    if (!wasThinking && ctx.state.partialBlockState.thinking) {
+      ctx.state.reasoningStreamOpen = true;
+    }
     // Detect when thinking block ends (</think> tag processed)
     if (wasThinking && !ctx.state.partialBlockState.thinking) {
-      void ctx.params.onReasoningEnd?.();
+      emitReasoningEnd(ctx);
     }
     const parsedDelta = visibleDelta ? ctx.consumePartialReplyDirectives(visibleDelta) : null;
     const parsedFull = parseReplyDirectives(stripTrailingDirective(next));
@@ -187,7 +231,11 @@ export function handleMessageUpdate(
         },
       });
       ctx.state.emittedAssistantUpdate = true;
-      if (ctx.params.onPartialReply && ctx.state.shouldEmitPartialReplies) {
+      if (
+        ctx.params.onPartialReply &&
+        ctx.state.shouldEmitPartialReplies &&
+        !ctx.state.suppressRepliesAfterMessagingSend
+      ) {
         void ctx.params.onPartialReply({
           text: cleanedText,
           mediaUrls: hasMedia ? mediaUrls : undefined,
@@ -201,13 +249,7 @@ export function handleMessageUpdate(
   }
 
   if (evtType === "text_end" && ctx.state.blockReplyBreak === "text_end") {
-    if (ctx.blockChunker?.hasBuffered()) {
-      ctx.blockChunker.drain({ force: true, emit: ctx.emitBlockChunk });
-      ctx.blockChunker.reset();
-    } else if (ctx.state.blockBuffer.length > 0) {
-      ctx.emitBlockChunk(ctx.state.blockBuffer);
-      ctx.state.blockBuffer = "";
-    }
+    ctx.flushBlockReplyBuffer();
   }
 }
 
@@ -292,6 +334,7 @@ export function handleMessageEnd(
     ctx.state.includeReasoning &&
     formattedReasoning &&
     onBlockReply &&
+    !ctx.state.suppressRepliesAfterMessagingSend &&
     formattedReasoning !== ctx.state.lastReasoningSent,
   );
   const shouldEmitReasoningBeforeAnswer =
@@ -301,7 +344,7 @@ export function handleMessageEnd(
       return;
     }
     ctx.state.lastReasoningSent = formattedReasoning;
-    void onBlockReply?.({ text: formattedReasoning });
+    void onBlockReply?.({ text: formattedReasoning, isReasoning: true });
   };
 
   if (shouldEmitReasoningBeforeAnswer) {
@@ -312,7 +355,8 @@ export function handleMessageEnd(
     (ctx.state.blockReplyBreak === "message_end" ||
       (ctx.blockChunker ? ctx.blockChunker.hasBuffered() : ctx.state.blockBuffer.length > 0)) &&
     text &&
-    onBlockReply
+    onBlockReply &&
+    !ctx.state.suppressRepliesAfterMessagingSend
   ) {
     if (ctx.blockChunker?.hasBuffered()) {
       ctx.blockChunker.drain({ force: true, emit: ctx.emitBlockChunk });
@@ -321,6 +365,7 @@ export function handleMessageEnd(
       // Check for duplicates before emitting (same logic as emitBlockChunk).
       const normalizedText = normalizeTextForComparison(text);
       if (
+        ctx.state.suppressRepliesAfterMessagingSend &&
         isMessagingToolDuplicateNormalized(
           normalizedText,
           ctx.state.messagingToolSentTextsNormalized,
@@ -364,7 +409,11 @@ export function handleMessageEnd(
     ctx.emitReasoningStream(rawThinking);
   }
 
-  if (ctx.state.blockReplyBreak === "text_end" && onBlockReply) {
+  if (
+    ctx.state.blockReplyBreak === "text_end" &&
+    onBlockReply &&
+    !ctx.state.suppressRepliesAfterMessagingSend
+  ) {
     const tailResult = ctx.consumeReplyDirectives("", { final: true });
     if (tailResult) {
       const {
@@ -396,4 +445,5 @@ export function handleMessageEnd(
   ctx.state.blockState.inlineCode = createInlineCodeState();
   ctx.state.lastStreamedAssistant = undefined;
   ctx.state.lastStreamedAssistantCleaned = undefined;
+  ctx.state.reasoningStreamOpen = false;
 }

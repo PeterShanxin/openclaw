@@ -1,6 +1,7 @@
 import { sanitizeGoogleTurnOrdering } from "./bootstrap.js";
 
 export function isGoogleModelApi(api?: string | null): boolean {
+<<<<<<< HEAD
   return (
     api === "google-gemini-cli" ||
     api === "google-generative-ai" ||
@@ -20,6 +21,9 @@ export function isAntigravityClaude(params: {
     return false;
   }
   return params.modelId?.toLowerCase().includes("claude") ?? false;
+=======
+  return api === "google-gemini-cli" || api === "google-generative-ai";
+>>>>>>> origin/chore/openclaw-v2026.2.26
 }
 
 export { sanitizeGoogleTurnOrdering };

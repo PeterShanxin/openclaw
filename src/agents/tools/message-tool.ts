@@ -246,6 +246,10 @@ function buildReactionSchema() {
     ),
     message_id: Type.Optional(
       Type.String({
+<<<<<<< HEAD
+=======
+        // Intentional duplicate alias for tool-schema discoverability in LLMs.
+>>>>>>> origin/chore/openclaw-v2026.2.26
         description:
           "snake_case alias of messageId. For Telegram, if omitted, defaults to the current inbound message id when available.",
       }),
@@ -441,6 +445,7 @@ type MessageToolOptions = {
   hasRepliedRef?: { value: boolean };
   sandboxRoot?: string;
   requireExplicitTarget?: boolean;
+  requesterSenderId?: string;
 };
 
 function resolveMessageToolSchemaActions(params: {
@@ -674,6 +679,7 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
         action,
         params,
         defaultAccountId: accountId ?? undefined,
+        requesterSenderId: options?.requesterSenderId,
         gateway,
         toolContext,
         sessionKey: options?.agentSessionKey,

@@ -1,5 +1,5 @@
 import { clearSessionAuthProfileOverride } from "../../agents/auth-profiles/session-override.js";
-import { lookupContextTokens } from "../../agents/context.js";
+import { resolveContextWindowInfo } from "../../agents/context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import { loadModelCatalog } from "../../agents/model-catalog.js";
 import {
@@ -8,6 +8,7 @@ import {
   modelKey,
   normalizeProviderId,
   resolveModelRefFromString,
+  resolveReasoningDefault,
   resolveThinkingDefault,
 } from "../../agents/model-selection.js";
 import type { OpenClawConfig } from "../../config/config.js";
@@ -32,6 +33,8 @@ type ModelSelectionState = {
   allowedModelCatalog: ModelCatalog;
   resetModelOverride: boolean;
   resolveDefaultThinkingLevel: () => Promise<ThinkLevel>;
+  /** Default reasoning level from model capability: "on" if model has reasoning, else "off". */
+  resolveDefaultReasoningLevel: () => Promise<"on" | "off">;
   needsModelCatalog: boolean;
 };
 
@@ -397,6 +400,19 @@ export async function createModelSelectionState(params: {
     return defaultThinkingLevel;
   };
 
+  const resolveDefaultReasoningLevel = async (): Promise<"on" | "off"> => {
+    let catalogForReasoning = modelCatalog ?? allowedModelCatalog;
+    if (!catalogForReasoning || catalogForReasoning.length === 0) {
+      modelCatalog = await loadModelCatalog({ config: cfg });
+      catalogForReasoning = modelCatalog;
+    }
+    return resolveReasoningDefault({
+      provider,
+      model,
+      catalog: catalogForReasoning,
+    });
+  };
+
   return {
     provider,
     model,
@@ -404,6 +420,7 @@ export async function createModelSelectionState(params: {
     allowedModelCatalog,
     resetModelOverride,
     resolveDefaultThinkingLevel,
+    resolveDefaultReasoningLevel,
     needsModelCatalog,
   };
 }
@@ -582,10 +599,22 @@ export function resolveModelDirectiveSelection(params: {
 }
 
 export function resolveContextTokens(params: {
+  cfg: OpenClawConfig;
   agentCfg: NonNullable<NonNullable<OpenClawConfig["agents"]>["defaults"]> | undefined;
+  provider: string;
   model: string;
+  modelContextWindow?: number;
 }): number {
-  return (
-    params.agentCfg?.contextTokens ?? lookupContextTokens(params.model) ?? DEFAULT_CONTEXT_TOKENS
-  );
+  const info = resolveContextWindowInfo({
+    cfg: params.cfg,
+    provider: params.provider,
+    modelId: params.model,
+    modelContextWindow: params.modelContextWindow,
+    defaultTokens: DEFAULT_CONTEXT_TOKENS,
+  });
+  const agentCap = params.agentCfg?.contextTokens;
+  if (typeof agentCap === "number" && Number.isFinite(agentCap) && agentCap > 0) {
+    return Math.min(info.tokens, Math.floor(agentCap));
+  }
+  return info.tokens;
 }

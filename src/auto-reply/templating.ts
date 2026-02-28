@@ -9,6 +9,7 @@ import type { CommandArgs } from "./commands-registry.types.js";
 
 /** Valid message channels for routing. */
 export type OriginatingChannelType = ChannelId | InternalMessageChannel;
+export type SenderKind = "human" | "bot" | "system";
 
 export type MsgContext = {
   Body?: string;
@@ -59,6 +60,13 @@ export type MsgContext = {
   ReplyToBody?: string;
   ReplyToSender?: string;
   ReplyToIsQuote?: boolean;
+  /** Forward origin from the reply target (when reply_to_message is a forwarded message). */
+  ReplyToForwardedFrom?: string;
+  ReplyToForwardedFromType?: string;
+  ReplyToForwardedFromId?: string;
+  ReplyToForwardedFromUsername?: string;
+  ReplyToForwardedFromTitle?: string;
+  ReplyToForwardedDate?: number;
   ForwardedFrom?: string;
   ForwardedFromType?: string;
   ForwardedFromId?: string;
@@ -109,6 +117,7 @@ export type MsgContext = {
   SenderId?: string;
   SenderUsername?: string;
   SenderTag?: string;
+  SenderKind?: SenderKind;
   SenderE164?: string;
   Timestamp?: number;
   /** Provider label (e.g. whatsapp, telegram). */

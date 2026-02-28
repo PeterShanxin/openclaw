@@ -41,7 +41,11 @@ export type EmbeddedPiRunMeta = {
       | "compaction_failure"
       | "role_ordering"
       | "image_size"
+<<<<<<< HEAD
       | "run_timeout";
+=======
+      | "retry_limit";
+>>>>>>> origin/chore/openclaw-v2026.2.26
     message: string;
   };
   /** Stop reason for the agent run (e.g., "completed", "tool_calls"). */
