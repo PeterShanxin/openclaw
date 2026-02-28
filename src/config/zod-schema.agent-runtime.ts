@@ -705,7 +705,7 @@ export const AgentEntrySchema = z
     sandbox: AgentSandboxSchema,
     tools: AgentToolsSchema,
   })
-  .strict();
+  .strip();
 
 export const ToolsSchema = z
   .object({

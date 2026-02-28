@@ -3,8 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
+import type { CliBackendConfig } from "../config/types.js";
 import { runCliAgent } from "./cli-runner.js";
-import { resolveCliNoOutputTimeoutMs } from "./cli-runner/helpers.js";
+import { buildCliArgs, resolveCliNoOutputTimeoutMs } from "./cli-runner/helpers.js";
 
 const supervisorSpawnMock = vi.fn();
 
@@ -217,5 +218,22 @@ describe("resolveCliNoOutputTimeoutMs", () => {
       useResume: true,
     });
     expect(timeoutMs).toBe(42_000);
+  });
+});
+
+describe("buildCliArgs", () => {
+  it("skips model injection when backend modelArg is blank", () => {
+    const args = buildCliArgs({
+      backend: {
+        command: "claude",
+        modelArg: "",
+      } as CliBackendConfig,
+      baseArgs: ["-p"],
+      modelId: "MiniMax-M2.5",
+      promptArg: "hi",
+      useResume: false,
+    });
+
+    expect(args).toEqual(["-p", "hi"]);
   });
 });

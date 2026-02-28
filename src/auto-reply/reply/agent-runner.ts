@@ -313,6 +313,9 @@ export async function runReplyAgent(params: {
       fallbackNoticeSelectedModel: undefined,
       fallbackNoticeActiveModel: undefined,
       fallbackNoticeReason: undefined,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
     };
     const agentId = resolveAgentIdFromSessionKey(sessionKey);
     const nextSessionFile = resolveSessionTranscriptPath(

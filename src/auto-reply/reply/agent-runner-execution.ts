@@ -126,6 +126,43 @@ export async function runAgentTurnWithFallback(params: {
   let didResetAfterCompactionFailure = false;
   let didRetryTransientHttpError = false;
 
+  // Hard guard: if context is at capacity (>= 98%), don't waste time on
+  // LLM calls that will inevitably fail — give the user immediate feedback.
+  const preflightEntry = params.getActiveSessionEntry();
+  if (preflightEntry) {
+    const pfTotal = preflightEntry.totalTokens ?? 0;
+    const pfCtx = preflightEntry.contextTokens ?? 0;
+    if (pfCtx > 0 && pfTotal > 0 && pfTotal / pfCtx >= 0.98) {
+      defaultRuntime.error(
+        `session preflight at capacity (${pfTotal}/${pfCtx}) for ${params.sessionKey ?? "unknown"}; attempting automatic reset`,
+      );
+      const resetSucceeded = await params.resetSessionAfterCompactionFailure(
+        `session preflight at capacity (${pfTotal}/${pfCtx})`,
+      );
+      if (!resetSucceeded) {
+        return {
+          kind: "final",
+          payload: {
+            text: "⚠️ Context is at capacity. Please use /reset or /new to start a fresh session.",
+          },
+        };
+      }
+
+      const resetEntry = params.getActiveSessionEntry();
+      const resetTotal = resetEntry?.totalTokens ?? 0;
+      const resetCtx = resetEntry?.contextTokens ?? 0;
+      if (resetCtx > 0 && resetTotal > 0 && resetTotal / resetCtx >= 0.98) {
+        return {
+          kind: "final",
+          payload: {
+            text:
+              "⚠️ Context is still at capacity after automatic recovery. Please use /reset or /new to start a fresh session.",
+          },
+        };
+      }
+    }
+  }
+
   while (true) {
     try {
       const normalizeStreamingText = (payload: ReplyPayload): { text?: string; skip: boolean } => {

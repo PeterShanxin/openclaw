@@ -1188,6 +1188,66 @@ describe("runReplyAgent typing (heartbeat)", () => {
     });
   });
 
+  it("automatically resets preflight-full sessions before running", async () => {
+    await withTempStateDir(async (stateDir) => {
+      const sessionId = "session";
+      const storePath = path.join(stateDir, "sessions", "sessions.json");
+      const transcriptPath = sessions.resolveSessionTranscriptPath(sessionId);
+      const sessionEntry = {
+        sessionId,
+        updatedAt: Date.now(),
+        sessionFile: transcriptPath,
+        totalTokens: 98,
+        contextTokens: 100,
+        inputTokens: 12,
+        outputTokens: 34,
+      };
+      const sessionStore = { main: sessionEntry };
+
+      await fs.mkdir(path.dirname(storePath), { recursive: true });
+      await fs.writeFile(storePath, JSON.stringify(sessionStore), "utf-8");
+      await fs.mkdir(path.dirname(transcriptPath), { recursive: true });
+      await fs.writeFile(transcriptPath, "ok", "utf-8");
+
+      state.runEmbeddedPiAgentMock.mockImplementationOnce(async () => ({
+        payloads: [{ text: "fresh-session-ok" }],
+        meta: {
+          durationMs: 1,
+          agentMeta: {
+            sessionId: "next-session",
+            provider: "anthropic",
+            model: "claude",
+          },
+        },
+      }));
+
+      const { run } = createMinimalRun({
+        sessionEntry,
+        sessionStore,
+        sessionKey: "main",
+        storePath,
+      });
+      const res = await run();
+
+      expect(state.runEmbeddedPiAgentMock).toHaveBeenCalledTimes(1);
+      const payload = Array.isArray(res) ? res[0] : res;
+      expect(payload).toMatchObject({ text: "fresh-session-ok" });
+      if (!payload) {
+        throw new Error("expected payload");
+      }
+      expect(sessionStore.main.sessionId).not.toBe(sessionId);
+      expect(sessionStore.main.totalTokens).toBe(0);
+      expect(sessionStore.main.inputTokens).toBe(0);
+      expect(sessionStore.main.outputTokens).toBe(0);
+
+      const persisted = JSON.parse(await fs.readFile(storePath, "utf-8"));
+      expect(persisted.main.sessionId).toBe(sessionStore.main.sessionId);
+      expect(persisted.main.totalTokens).toBe(0);
+      expect(persisted.main.inputTokens).toBe(0);
+      expect(persisted.main.outputTokens).toBe(0);
+    });
+  });
+
   it("surfaces overflow fallback when embedded run returns empty payloads", async () => {
     state.runEmbeddedPiAgentMock.mockImplementationOnce(async () => ({
       payloads: [],
