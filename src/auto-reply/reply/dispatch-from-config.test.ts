@@ -144,6 +144,7 @@ vi.mock("../../tts/tts.js", () => ({
 }));
 
 const { dispatchReplyFromConfig } = await import("./dispatch-from-config.js");
+const { resetAutomatedMentionGuard } = await import("./automated-mention-guard.js");
 const { resetInboundDedupe } = await import("./inbound-dedupe.js");
 const { __testing: acpManagerTesting } = await import("../../acp/control-plane/manager.js");
 
@@ -206,6 +207,7 @@ async function dispatchTwiceWithFreshDispatchers(params: Omit<DispatchReplyArgs,
 describe("dispatchReplyFromConfig", () => {
   beforeEach(() => {
     acpManagerTesting.resetAcpSessionManagerForTests();
+    resetAutomatedMentionGuard();
     resetInboundDedupe();
     acpMocks.listAcpSessionEntries.mockReset().mockResolvedValue([]);
     diagnosticMocks.logMessageQueued.mockClear();
@@ -1504,6 +1506,59 @@ describe("dispatchReplyFromConfig", () => {
         channel: "whatsapp",
         outcome: "skipped",
         reason: "duplicate",
+      }),
+    );
+  });
+
+  it("marks diagnostics skipped for automated mention cascades", async () => {
+    setNoAbort();
+    const cfg = { diagnostics: { enabled: true } } as OpenClawConfig;
+    const replyResolver = vi.fn(async () => ({ text: "hi" }) as ReplyPayload);
+
+    await dispatchReplyFromConfig({
+      ctx: buildTestCtx({
+        Surface: "discord",
+        ChatType: "channel",
+        To: "channel:c1",
+        OriginatingTo: "channel:c1",
+        SessionKey: "agent:pm:main",
+        SenderId: "nova-bot",
+        SenderKind: "bot",
+        WasMentioned: true,
+        MessageSid: "m-1",
+      }),
+      cfg,
+      dispatcher: createDispatcher(),
+      replyResolver,
+    });
+
+    const second = await dispatchReplyFromConfig({
+      ctx: buildTestCtx({
+        Surface: "discord",
+        ChatType: "channel",
+        To: "channel:c1",
+        OriginatingTo: "channel:c1",
+        SessionKey: "agent:pm:main",
+        SenderId: "nova-bot",
+        SenderKind: "bot",
+        WasMentioned: true,
+        MessageSid: "m-2",
+      }),
+      cfg,
+      dispatcher: createDispatcher(),
+      replyResolver,
+    });
+
+    expect(replyResolver).toHaveBeenCalledTimes(1);
+    expect(second).toEqual({
+      queuedFinal: false,
+      counts: { tool: 0, block: 0, final: 0 },
+    });
+    expect(diagnosticMocks.logMessageProcessed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "discord",
+        outcome: "skipped",
+        reason: "automated_mention_cascade",
       }),
     );
   });

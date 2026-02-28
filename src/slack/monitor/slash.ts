@@ -555,6 +555,7 @@ export async function registerSlackMonitorSlashCommands(params: {
         UntrustedContext: untrustedChannelMetadata ? [untrustedChannelMetadata] : undefined,
         SenderName: senderName,
         SenderId: command.user_id,
+        SenderKind: "human" as const,
         Provider: "slack" as const,
         Surface: "slack" as const,
         WasMentioned: true,

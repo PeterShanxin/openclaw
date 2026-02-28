@@ -9,6 +9,7 @@ import type { CommandArgs } from "./commands-registry.types.js";
 
 /** Valid message channels for routing. */
 export type OriginatingChannelType = ChannelId | InternalMessageChannel;
+export type SenderKind = "human" | "bot" | "system";
 
 export type MsgContext = {
   Body?: string;
@@ -116,6 +117,7 @@ export type MsgContext = {
   SenderId?: string;
   SenderUsername?: string;
   SenderTag?: string;
+  SenderKind?: SenderKind;
   SenderE164?: string;
   Timestamp?: number;
   /** Provider label (e.g. whatsapp, telegram). */

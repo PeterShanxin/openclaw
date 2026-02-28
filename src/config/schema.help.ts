@@ -1208,6 +1208,12 @@ export const FIELD_HELP: Record<string, string> = {
     "Regex-like patterns used to detect explicit mentions/trigger phrases in group chats. Use precise patterns to reduce false positives in high-volume channels.",
   "messages.groupChat.historyLimit":
     "Maximum number of prior group messages loaded as context per turn for group sessions. Use higher values for richer continuity, or lower values for faster and cheaper responses.",
+  "messages.groupChat.automatedMentionGuard":
+    "Consecutive bot-mention suppression for group and channel chats. Keep this enabled when multiple bot accounts share rooms so repeated automated @mentions do not fan out into duplicate agent runs.",
+  "messages.groupChat.automatedMentionGuard.enabled":
+    "Enables the consecutive bot-mention cascade guard for group and channel inbound messages. Disable only if you intentionally want every bot-authored mention burst to trigger independent agent runs.",
+  "messages.groupChat.automatedMentionGuard.windowMs":
+    "Cooldown window in milliseconds used to suppress repeated mention-triggering messages from the same bot sender in the same conversation. Increase to collapse longer bot bursts, or lower for faster re-triggering.",
   "messages.queue":
     "Inbound message queue strategy used to buffer bursts before processing turns. Tune this for busy channels where sequential processing or batching behavior matters.",
   "messages.queue.mode":

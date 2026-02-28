@@ -263,6 +263,13 @@ export const GroupChatSchema = z
   .object({
     mentionPatterns: z.array(z.string()).optional(),
     historyLimit: z.number().int().positive().optional(),
+    automatedMentionGuard: z
+      .object({
+        enabled: z.boolean().optional(),
+        windowMs: z.number().int().nonnegative().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .optional();

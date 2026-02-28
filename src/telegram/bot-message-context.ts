@@ -658,6 +658,7 @@ export const buildTelegramMessageContext = async ({
     SenderName: senderName,
     SenderId: senderId || undefined,
     SenderUsername: senderUsername || undefined,
+    SenderKind: msg.from?.is_bot === true ? "bot" : "human",
     Provider: "telegram",
     Surface: "telegram",
     MessageSid: options?.messageIdOverride ?? String(msg.message_id),

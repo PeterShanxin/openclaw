@@ -156,11 +156,11 @@ function getLastRouteUpdate():
 }
 
 function getLastDispatchCtx():
-  | { SessionKey?: string; MessageThreadId?: string | number }
+  | { SessionKey?: string; MessageThreadId?: string | number; SenderKind?: string }
   | undefined {
   const callArgs = dispatchInboundMessage.mock.calls.at(-1) as unknown[] | undefined;
   const params = callArgs?.[0] as
-    | { ctx?: { SessionKey?: string; MessageThreadId?: string | number } }
+    | { ctx?: { SessionKey?: string; MessageThreadId?: string | number; SenderKind?: string } }
     | undefined;
   return params?.ctx;
 }
@@ -211,6 +211,23 @@ describe("processDiscordMessage ack reactions", () => {
       "👀",
       { rest: {} },
     ]);
+  });
+
+  it("marks bot-authored inbound messages with SenderKind=bot", async () => {
+    const ctx = await createBaseContext({
+      author: {
+        id: "bot-2",
+        username: "Nova",
+        discriminator: "0",
+        globalName: "Nova",
+        bot: true,
+      },
+    });
+
+    // oxlint-disable-next-line typescript/no-explicit-any
+    await processDiscordMessage(ctx as any);
+
+    expect(getLastDispatchCtx()?.SenderKind).toBe("bot");
   });
 
   it("debounces intermediate phase reactions and jumps to done for short runs", async () => {

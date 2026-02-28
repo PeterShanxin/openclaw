@@ -92,7 +92,7 @@ export async function prepareSlackMessage(params: {
     cfg.channels?.slack?.allowBots ??
     false;
 
-  const isBotMessage = Boolean(message.bot_id);
+  const isBotMessage = Boolean(message.bot_id || message.subtype === "bot_message");
   if (isBotMessage) {
     if (message.user && ctx.botUserId && message.user === ctx.botUserId) {
       return null;
@@ -594,6 +594,7 @@ export async function prepareSlackMessage(params: {
     UntrustedContext: untrustedChannelMetadata ? [untrustedChannelMetadata] : undefined,
     SenderName: senderName,
     SenderId: senderId,
+    SenderKind: isBotMessage ? "bot" : "human",
     Provider: "slack" as const,
     Surface: "slack" as const,
     MessageSid: message.ts,

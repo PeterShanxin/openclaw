@@ -129,12 +129,32 @@ export type SessionDefaultsOptions = {
 export function applyMessageDefaults(cfg: OpenClawConfig): OpenClawConfig {
   const messages = cfg.messages;
   const hasAckScope = messages?.ackReactionScope !== undefined;
-  if (hasAckScope) {
+  const hasAutomatedMentionGuardEnabled =
+    messages?.groupChat?.automatedMentionGuard?.enabled !== undefined;
+  const hasAutomatedMentionGuardWindow =
+    messages?.groupChat?.automatedMentionGuard?.windowMs !== undefined;
+  if (hasAckScope && hasAutomatedMentionGuardEnabled && hasAutomatedMentionGuardWindow) {
     return cfg;
   }
 
   const nextMessages = messages ? { ...messages } : {};
-  nextMessages.ackReactionScope = "group-mentions";
+  if (!hasAckScope) {
+    nextMessages.ackReactionScope = "group-mentions";
+  }
+  if (!hasAutomatedMentionGuardEnabled || !hasAutomatedMentionGuardWindow) {
+    const nextGroupChat = nextMessages.groupChat ? { ...nextMessages.groupChat } : {};
+    const nextGuard = nextGroupChat.automatedMentionGuard
+      ? { ...nextGroupChat.automatedMentionGuard }
+      : {};
+    if (!hasAutomatedMentionGuardEnabled) {
+      nextGuard.enabled = true;
+    }
+    if (!hasAutomatedMentionGuardWindow) {
+      nextGuard.windowMs = 15_000;
+    }
+    nextGroupChat.automatedMentionGuard = nextGuard;
+    nextMessages.groupChat = nextGroupChat;
+  }
   return {
     ...cfg,
     messages: nextMessages,

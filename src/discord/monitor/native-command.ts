@@ -1566,6 +1566,7 @@ async function dispatchDiscordCommandInteraction(params: {
     SenderId: user.id,
     SenderUsername: user.username,
     SenderTag: sender.tag,
+    SenderKind: "human" as const,
     Provider: "discord" as const,
     Surface: "discord" as const,
     WasMentioned: true,

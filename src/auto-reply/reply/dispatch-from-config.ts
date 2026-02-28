@@ -17,6 +17,7 @@ import { getReplyFromConfig } from "../reply.js";
 import type { FinalizedMsgContext } from "../templating.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { formatAbortReplyText, tryFastAbortFromMessage } from "./abort.js";
+import { shouldSkipAutomatedMentionCascade } from "./automated-mention-guard.js";
 import { shouldBypassAcpDispatchForCommand, tryDispatchAcpReply } from "./dispatch-acp.js";
 import { shouldSkipDuplicateInbound } from "./inbound-dedupe.js";
 import type { ReplyDispatcher, ReplyDispatchKind } from "./reply-dispatcher.js";
@@ -154,6 +155,10 @@ export async function dispatchReplyFromConfig(params: {
 
   if (shouldSkipDuplicateInbound(ctx)) {
     recordProcessed("skipped", { reason: "duplicate" });
+    return { queuedFinal: false, counts: dispatcher.getQueuedCounts() };
+  }
+  if (shouldSkipAutomatedMentionCascade(ctx, cfg)) {
+    recordProcessed("skipped", { reason: "automated_mention_cascade" });
     return { queuedFinal: false, counts: dispatcher.getQueuedCounts() };
   }
 

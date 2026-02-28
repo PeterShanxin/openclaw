@@ -4,6 +4,10 @@ import type { TtsConfig } from "./types.tts.js";
 export type GroupChatConfig = {
   mentionPatterns?: string[];
   historyLimit?: number;
+  automatedMentionGuard?: {
+    enabled?: boolean;
+    windowMs?: number;
+  };
 };
 
 export type DmConfig = {

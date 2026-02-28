@@ -87,6 +87,23 @@ type SenderNameResult = {
   permissionError?: PermissionError;
 };
 
+function resolveFeishuSenderKind(senderType?: string): "human" | "bot" | "system" | undefined {
+  const normalized = senderType?.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized === "user") {
+    return "human";
+  }
+  if (normalized === "system") {
+    return "system";
+  }
+  if (normalized.includes("bot") || normalized.includes("app")) {
+    return "bot";
+  }
+  return undefined;
+}
+
 async function resolveFeishuSenderName(params: {
   account: ResolvedFeishuAccount;
   senderOpenId: string;
@@ -475,6 +492,7 @@ export function parseFeishuMessageEvent(
     messageId: event.message.message_id,
     senderId: event.sender.sender_id.user_id || event.sender.sender_id.open_id || "",
     senderOpenId: event.sender.sender_id.open_id || "",
+    senderKind: resolveFeishuSenderKind(event.sender.sender_type),
     chatType: event.message.chat_type,
     mentionedBot,
     rootId: event.message.root_id || undefined,
@@ -925,6 +943,7 @@ export async function handleFeishuMessage(params: {
       GroupSubject: isGroup ? ctx.chatId : undefined,
       SenderName: ctx.senderName ?? ctx.senderOpenId,
       SenderId: ctx.senderOpenId,
+      SenderKind: ctx.senderKind,
       Provider: "feishu" as const,
       Surface: "feishu" as const,
       MessageSid: ctx.messageId,

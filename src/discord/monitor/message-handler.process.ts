@@ -345,6 +345,7 @@ export async function processDiscordMessage(ctx: DiscordMessagePreflightContext)
     SenderId: sender.id,
     SenderUsername: senderUsername,
     SenderTag: senderTag,
+    SenderKind: author.bot === true ? "bot" : "human",
     GroupSubject: groupSubject,
     GroupChannel: groupChannel,
     UntrustedContext: untrustedChannelMetadata ? [untrustedChannelMetadata] : undefined,

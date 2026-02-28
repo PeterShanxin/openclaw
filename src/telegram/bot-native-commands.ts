@@ -577,6 +577,7 @@ export const registerTelegramNativeCommands = ({
             SenderName: buildSenderName(msg),
             SenderId: senderId || undefined,
             SenderUsername: senderUsername || undefined,
+            SenderKind: msg.from?.is_bot === true ? "bot" : "human",
             Surface: "telegram",
             Provider: "telegram",
             MessageSid: String(msg.message_id),

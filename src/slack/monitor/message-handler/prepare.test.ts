@@ -198,6 +198,31 @@ describe("slack prepareSlackMessage inbound contract", () => {
     expectInboundContextContract(prepared!.ctxPayload as any);
   });
 
+  it("marks bot-authored slack messages with SenderKind=bot when allowBots is enabled", async () => {
+    const ctx = createInboundSlackCtx({
+      cfg: {
+        channels: { slack: { enabled: true, allowBots: true } },
+      } as OpenClawConfig,
+    });
+    // oxlint-disable-next-line typescript/no-explicit-any
+    ctx.resolveUserName = async () => ({ name: "Nova" }) as any;
+
+    const prepared = await prepareMessageWith(
+      ctx,
+      createSlackAccount({ allowBots: true }),
+      createSlackMessage({
+        channel: "C123",
+        channel_type: "channel",
+        text: "<@B1> hello",
+        bot_id: "B2",
+        username: "nova",
+      }),
+    );
+
+    expect(prepared).toBeTruthy();
+    expect(prepared?.ctxPayload.SenderKind).toBe("bot");
+  });
+
   it("includes forwarded shared attachment text in raw body", async () => {
     const prepared = await prepareWithDefaultCtx(
       createSlackMessage({
