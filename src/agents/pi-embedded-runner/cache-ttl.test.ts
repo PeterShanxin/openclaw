@@ -2,28 +2,29 @@ import { describe, expect, it } from "vitest";
 import { isCacheTtlEligibleProvider } from "./cache-ttl.js";
 
 describe("isCacheTtlEligibleProvider", () => {
-  it("defaults to provider-agnostic allow mode", () => {
-    expect(isCacheTtlEligibleProvider("anthropic", "claude-opus")).toBe(true);
-    expect(isCacheTtlEligibleProvider("zai", "glm-4.7")).toBe(true);
-    expect(isCacheTtlEligibleProvider("qwen", "qwen3-coder-plus")).toBe(true);
+  it("allows anthropic", () => {
+    expect(isCacheTtlEligibleProvider("anthropic", "claude-sonnet-4-20250514")).toBe(true);
   });
 
-  it("supports allowlist mode", () => {
-    const cfg = {
-      providersMode: "allowlist" as const,
-      allowProviders: ["anthropic", "zai"],
-    };
-    expect(isCacheTtlEligibleProvider("anthropic", "claude-opus", cfg)).toBe(true);
-    expect(isCacheTtlEligibleProvider("zai", "glm-4.7", cfg)).toBe(true);
-    expect(isCacheTtlEligibleProvider("qwen", "qwen3-coder-plus", cfg)).toBe(false);
+  it("allows moonshot and zai providers", () => {
+    expect(isCacheTtlEligibleProvider("moonshot", "kimi-k2.5")).toBe(true);
+    expect(isCacheTtlEligibleProvider("zai", "glm-5")).toBe(true);
   });
 
-  it("supports denylist mode for all-providers policy", () => {
-    const cfg = {
-      providersMode: "all" as const,
-      denyProviders: ["anthropic"],
-    };
-    expect(isCacheTtlEligibleProvider("anthropic", "claude-opus", cfg)).toBe(false);
-    expect(isCacheTtlEligibleProvider("zai", "glm-4.7", cfg)).toBe(true);
+  it("is case-insensitive for native providers", () => {
+    expect(isCacheTtlEligibleProvider("Moonshot", "Kimi-K2.5")).toBe(true);
+    expect(isCacheTtlEligibleProvider("ZAI", "GLM-5")).toBe(true);
+  });
+
+  it("allows openrouter cache-ttl models", () => {
+    expect(isCacheTtlEligibleProvider("openrouter", "anthropic/claude-sonnet-4")).toBe(true);
+    expect(isCacheTtlEligibleProvider("openrouter", "moonshotai/kimi-k2.5")).toBe(true);
+    expect(isCacheTtlEligibleProvider("openrouter", "moonshot/kimi-k2.5")).toBe(true);
+    expect(isCacheTtlEligibleProvider("openrouter", "zai/glm-5")).toBe(true);
+  });
+
+  it("rejects unsupported providers and models", () => {
+    expect(isCacheTtlEligibleProvider("openai", "gpt-4o")).toBe(false);
+    expect(isCacheTtlEligibleProvider("openrouter", "openai/gpt-4o")).toBe(false);
   });
 });

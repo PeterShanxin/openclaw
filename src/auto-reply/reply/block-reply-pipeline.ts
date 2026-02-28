@@ -1,7 +1,7 @@
-import type { ReplyPayload } from "../types.js";
-import type { BlockStreamingCoalescing } from "./block-streaming.js";
 import { logVerbose } from "../../globals.js";
+import type { ReplyPayload } from "../types.js";
 import { createBlockReplyCoalescer } from "./block-reply-coalescer.js";
+import type { BlockStreamingCoalescing } from "./block-streaming.js";
 
 export type BlockReplyPipeline = {
   enqueue: (payload: ReplyPayload) => void;
@@ -11,7 +11,6 @@ export type BlockReplyPipeline = {
   didStream: () => boolean;
   isAborted: () => boolean;
   hasSentPayload: (payload: ReplyPayload) => boolean;
-  hasEnqueuedPayload: (payload: ReplyPayload) => boolean;
 };
 
 export type BlockReplyBuffer = {
@@ -45,6 +44,7 @@ export function createBlockReplyPayloadKey(payload: ReplyPayload): string {
   return JSON.stringify({
     text,
     mediaList,
+    replyToId: payload.replyToId ?? null,
   });
 }
 
@@ -84,8 +84,6 @@ export function createBlockReplyPipeline(params: {
   const seenKeys = new Set<string>();
   const bufferedKeys = new Set<string>();
   const bufferedPayloadKeys = new Set<string>();
-  /** Persistent record of every individual payload key ever enqueued (never cleared). */
-  const allEnqueuedKeys = new Set<string>();
   const bufferedPayloads: ReplyPayload[] = [];
   let sendChain: Promise<void> = Promise.resolve();
   let aborted = false;
@@ -198,7 +196,6 @@ export function createBlockReplyPipeline(params: {
     if (aborted) {
       return;
     }
-    allEnqueuedKeys.add(createBlockReplyPayloadKey(payload));
     if (bufferPayload(payload)) {
       return;
     }
@@ -240,10 +237,6 @@ export function createBlockReplyPipeline(params: {
     hasSentPayload: (payload) => {
       const payloadKey = createBlockReplyPayloadKey(payload);
       return sentKeys.has(payloadKey);
-    },
-    hasEnqueuedPayload: (payload) => {
-      const payloadKey = createBlockReplyPayloadKey(payload);
-      return allEnqueuedKeys.has(payloadKey);
     },
   };
 }

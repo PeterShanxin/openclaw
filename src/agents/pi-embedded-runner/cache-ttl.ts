@@ -1,6 +1,3 @@
-import type { AgentContextPruningConfig } from "../../config/types.agent-defaults.js";
-import { normalizeProviderId } from "../model-selection.js";
-
 type CustomEntryLike = { type?: unknown; customType?: unknown; data?: unknown };
 
 export const CACHE_TTL_CUSTOM_TYPE = "openclaw.cache-ttl";
@@ -11,32 +8,31 @@ export type CacheTtlEntryData = {
   modelId?: string;
 };
 
-function normalizeProviderList(raw?: string[]): Set<string> {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    return new Set<string>();
-  }
-  return new Set(
-    raw
-      .map((entry) => normalizeProviderId(String(entry ?? "").trim()))
-      .filter((entry) => entry.length > 0),
-  );
+const CACHE_TTL_NATIVE_PROVIDERS = new Set(["anthropic", "moonshot", "zai"]);
+const OPENROUTER_CACHE_TTL_MODEL_PREFIXES = [
+  "anthropic/",
+  "moonshot/",
+  "moonshotai/",
+  "zai/",
+] as const;
+
+function isOpenRouterCacheTtlModel(modelId: string): boolean {
+  return OPENROUTER_CACHE_TTL_MODEL_PREFIXES.some((prefix) => modelId.startsWith(prefix));
 }
 
-export function isCacheTtlEligibleProvider(
-  provider: string,
-  _modelId: string,
-  contextPruning?: AgentContextPruningConfig,
-): boolean {
-  const normalizedProvider = normalizeProviderId(provider);
-  const mode = contextPruning?.providersMode ?? "all";
-  const allow = normalizeProviderList(contextPruning?.allowProviders);
-  const deny = normalizeProviderList(contextPruning?.denyProviders);
-
-  if (mode === "allowlist") {
-    return allow.has(normalizedProvider);
+export function isCacheTtlEligibleProvider(provider: string, modelId: string): boolean {
+  const normalizedProvider = provider.toLowerCase();
+  const normalizedModelId = modelId.toLowerCase();
+  if (CACHE_TTL_NATIVE_PROVIDERS.has(normalizedProvider)) {
+    return true;
   }
-
-  return !deny.has(normalizedProvider);
+  if (normalizedProvider === "openrouter" && isOpenRouterCacheTtlModel(normalizedModelId)) {
+    return true;
+  }
+  if (normalizedProvider === "kilocode" && normalizedModelId.startsWith("anthropic/")) {
+    return true;
+  }
+  return false;
 }
 
 export function readLastCacheTtlTimestamp(sessionManager: unknown): number | null {

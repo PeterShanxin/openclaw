@@ -1,6 +1,6 @@
 import type { OpenClawConfig } from "../config/config.js";
 
-const DEFAULT_AGENT_TIMEOUT_SECONDS = 0;
+const DEFAULT_AGENT_TIMEOUT_SECONDS = 600;
 const MAX_SAFE_TIMEOUT_MS = 2_147_000_000;
 
 const normalizeNumber = (value: unknown): number | undefined =>
@@ -9,43 +9,7 @@ const normalizeNumber = (value: unknown): number | undefined =>
 export function resolveAgentTimeoutSeconds(cfg?: OpenClawConfig): number {
   const raw = normalizeNumber(cfg?.agents?.defaults?.timeoutSeconds);
   const seconds = raw ?? DEFAULT_AGENT_TIMEOUT_SECONDS;
-  return Math.max(seconds, 0);
-}
-
-export function resolveAgentStreamIdleTimeoutMs(opts: {
-  cfg?: OpenClawConfig;
-  overrideMs?: number | null;
-  overrideSeconds?: number | null;
-  minMs?: number;
-}): number {
-  const minMs = Math.max(normalizeNumber(opts.minMs) ?? 1, 1);
-  const rawDefaultSeconds = normalizeNumber(opts.cfg?.agents?.defaults?.streamIdleTimeoutSeconds);
-  const defaultMs =
-    rawDefaultSeconds !== undefined && rawDefaultSeconds > 0 ? rawDefaultSeconds * 1000 : 0;
-  const overrideMs = normalizeNumber(opts.overrideMs);
-  if (overrideMs !== undefined) {
-    if (overrideMs === 0) {
-      return 0;
-    }
-    if (overrideMs < 0) {
-      return defaultMs;
-    }
-    return Math.max(overrideMs, minMs);
-  }
-  const overrideSeconds = normalizeNumber(opts.overrideSeconds);
-  if (overrideSeconds !== undefined) {
-    if (overrideSeconds === 0) {
-      return 0;
-    }
-    if (overrideSeconds < 0) {
-      return defaultMs;
-    }
-    return Math.max(overrideSeconds * 1000, minMs);
-  }
-  if (defaultMs <= 0) {
-    return 0;
-  }
-  return Math.max(defaultMs, minMs);
+  return Math.max(seconds, 1);
 }
 
 export function resolveAgentTimeoutMs(opts: {
@@ -57,10 +21,9 @@ export function resolveAgentTimeoutMs(opts: {
   const minMs = Math.max(normalizeNumber(opts.minMs) ?? 1, 1);
   const clampTimeoutMs = (valueMs: number) =>
     Math.min(Math.max(valueMs, minMs), MAX_SAFE_TIMEOUT_MS);
+  const defaultMs = clampTimeoutMs(resolveAgentTimeoutSeconds(opts.cfg) * 1000);
   // Use the maximum timer-safe timeout to represent "no timeout" when explicitly set to 0.
   const NO_TIMEOUT_MS = MAX_SAFE_TIMEOUT_MS;
-  const defaultSeconds = resolveAgentTimeoutSeconds(opts.cfg);
-  const defaultMs = defaultSeconds <= 0 ? NO_TIMEOUT_MS : clampTimeoutMs(defaultSeconds * 1000);
   const overrideMs = normalizeNumber(opts.overrideMs);
   if (overrideMs !== undefined) {
     if (overrideMs === 0) {

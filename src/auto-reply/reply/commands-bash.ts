@@ -1,6 +1,6 @@
-import type { CommandHandler } from "./commands-types.js";
-import { logVerbose } from "../../globals.js";
 import { handleBashChatCommand } from "./bash-command.js";
+import { rejectUnauthorizedCommand } from "./command-gates.js";
+import type { CommandHandler } from "./commands-types.js";
 
 export const handleBashCommand: CommandHandler = async (params, allowTextCommands) => {
   if (!allowTextCommands) {
@@ -9,16 +9,13 @@ export const handleBashCommand: CommandHandler = async (params, allowTextCommand
   const { command } = params;
   const bashSlashRequested =
     command.commandBodyNormalized === "/bash" || command.commandBodyNormalized.startsWith("/bash ");
-  // Treat leading "!" as a bash alias only when bash commands are enabled.
-  // This avoids accidental interception of normal messages that start with "!" (e.g. "! hacked? ...").
-  const bashBangRequested =
-    params.cfg.commands?.bash === true && command.commandBodyNormalized.startsWith("!");
+  const bashBangRequested = command.commandBodyNormalized.startsWith("!");
   if (!bashSlashRequested && !(bashBangRequested && command.isAuthorizedSender)) {
     return null;
   }
-  if (!command.isAuthorizedSender) {
-    logVerbose(`Ignoring /bash from unauthorized sender: ${command.senderId || "<unknown>"}`);
-    return { shouldContinue: false };
+  const unauthorized = rejectUnauthorizedCommand(params, "/bash");
+  if (unauthorized) {
+    return unauthorized;
   }
   const reply = await handleBashChatCommand({
     ctx: params.ctx,

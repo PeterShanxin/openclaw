@@ -1,5 +1,9 @@
 import type { SessionManager } from "@mariozechner/pi-coding-agent";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
+import {
+  applyInputProvenanceToUserMessage,
+  type InputProvenance,
+} from "../sessions/input-provenance.js";
 import { installSessionToolResultGuard } from "./session-tool-result-guard.js";
 
 export type GuardedSessionManager = SessionManager & {
@@ -16,17 +20,9 @@ export function guardSessionManager(
   opts?: {
     agentId?: string;
     sessionKey?: string;
+    inputProvenance?: InputProvenance;
     allowSyntheticToolResults?: boolean;
-    toolOutputBudget?: {
-      readChars?: number;
-      execChars?: number;
-    };
-    onToolResultTruncated?: (event: {
-      toolName?: string;
-      originalChars: number;
-      includedChars: number;
-      budgetChars: number;
-    }) => void;
+    allowedToolNames?: Iterable<string>;
   },
 ): GuardedSessionManager {
   if (typeof (sessionManager as GuardedSessionManager).flushPendingToolResults === "function") {
@@ -34,6 +30,15 @@ export function guardSessionManager(
   }
 
   const hookRunner = getGlobalHookRunner();
+  const beforeMessageWrite = hookRunner?.hasHooks("before_message_write")
+    ? (event: { message: import("@mariozechner/pi-agent-core").AgentMessage }) => {
+        return hookRunner.runBeforeMessageWrite(event, {
+          agentId: opts?.agentId,
+          sessionKey: opts?.sessionKey,
+        });
+      }
+    : undefined;
+
   const transform = hookRunner?.hasHooks("tool_result_persist")
     ? // oxlint-disable-next-line typescript/no-explicit-any
       (message: any, meta: { toolCallId?: string; toolName?: string; isSynthetic?: boolean }) => {
@@ -56,10 +61,12 @@ export function guardSessionManager(
     : undefined;
 
   const guard = installSessionToolResultGuard(sessionManager, {
+    transformMessageForPersistence: (message) =>
+      applyInputProvenanceToUserMessage(message, opts?.inputProvenance),
     transformToolResultForPersistence: transform,
     allowSyntheticToolResults: opts?.allowSyntheticToolResults,
-    toolOutputBudget: opts?.toolOutputBudget,
-    onToolResultTruncated: opts?.onToolResultTruncated,
+    allowedToolNames: opts?.allowedToolNames,
+    beforeMessageWriteHook: beforeMessageWrite,
   });
   (sessionManager as GuardedSessionManager).flushPendingToolResults = guard.flushPendingToolResults;
   return sessionManager as GuardedSessionManager;

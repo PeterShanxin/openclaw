@@ -1,190 +1,43 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { TextContent } from "@mariozechner/pi-ai";
 import type { SessionManager } from "@mariozechner/pi-coding-agent";
+import type {
+  PluginHookBeforeMessageWriteEvent,
+  PluginHookBeforeMessageWriteResult,
+} from "../plugins/types.js";
 import { emitSessionTranscriptUpdate } from "../sessions/transcript-events.js";
-import { HARD_MAX_TOOL_RESULT_CHARS } from "./pi-embedded-runner/tool-result-truncation.js";
+import {
+  HARD_MAX_TOOL_RESULT_CHARS,
+  truncateToolResultMessage,
+} from "./pi-embedded-runner/tool-result-truncation.js";
 import { makeMissingToolResult, sanitizeToolCallInputs } from "./session-transcript-repair.js";
+import { extractToolCallsFromAssistant, extractToolResultId } from "./tool-call-id.js";
 
 const GUARD_TRUNCATION_SUFFIX =
   "\n\n⚠️ [Content truncated during persistence — original exceeded size limit. " +
   "Use offset/limit parameters or request specific sections for large content.]";
-const DEFAULT_READ_TOOL_RESULT_CHARS = 12_000;
-const DEFAULT_EXEC_TOOL_RESULT_CHARS = 8_000;
 
 /**
  * Truncate oversized text content blocks in a tool result message.
  * Returns the original message if under the limit, or a new message with
  * truncated text blocks otherwise.
  */
-function truncateHeadTail(text: string, maxChars: number): string {
-  if (text.length <= maxChars) {
-    return text;
+function capToolResultSize(msg: AgentMessage): AgentMessage {
+  if ((msg as { role?: string }).role !== "toolResult") {
+    return msg;
   }
-  if (maxChars <= GUARD_TRUNCATION_SUFFIX.length + 16) {
-    return `${text.slice(0, Math.max(0, maxChars - GUARD_TRUNCATION_SUFFIX.length))}${GUARD_TRUNCATION_SUFFIX}`;
-  }
-  const available = maxChars - GUARD_TRUNCATION_SUFFIX.length;
-  const headChars = Math.max(1, Math.floor(available * 0.6));
-  const tailChars = Math.max(1, available - headChars);
-  return `${text.slice(0, headChars)}${GUARD_TRUNCATION_SUFFIX}${text.slice(-tailChars)}`;
-}
-
-type ToolOutputBudget = {
-  readChars?: number;
-  execChars?: number;
-};
-
-type ToolResultCapResult = {
-  message: AgentMessage;
-  truncated: boolean;
-  originalChars: number;
-  includedChars: number;
-  budgetChars: number;
-};
-
-function resolveToolResultBudget(toolName: string | undefined, budget?: ToolOutputBudget): number {
-  const normalized = toolName?.trim().toLowerCase();
-  if (normalized === "read") {
-    const configured = budget?.readChars;
-    if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
-      return Math.min(HARD_MAX_TOOL_RESULT_CHARS, Math.floor(configured));
-    }
-    return DEFAULT_READ_TOOL_RESULT_CHARS;
-  }
-  if (normalized === "exec") {
-    const configured = budget?.execChars;
-    if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
-      return Math.min(HARD_MAX_TOOL_RESULT_CHARS, Math.floor(configured));
-    }
-    return DEFAULT_EXEC_TOOL_RESULT_CHARS;
-  }
-  return HARD_MAX_TOOL_RESULT_CHARS;
-}
-
-function capToolResultSize(
-  msg: AgentMessage,
-  toolName: string | undefined,
-  budget?: ToolOutputBudget,
-): ToolResultCapResult {
-  const role = (msg as { role?: string }).role;
-  if (role !== "toolResult") {
-    return {
-      message: msg,
-      truncated: false,
-      originalChars: 0,
-      includedChars: 0,
-      budgetChars: HARD_MAX_TOOL_RESULT_CHARS,
-    };
-  }
-  const content = (msg as { content?: unknown }).content;
-  if (!Array.isArray(content)) {
-    return {
-      message: msg,
-      truncated: false,
-      originalChars: 0,
-      includedChars: 0,
-      budgetChars: HARD_MAX_TOOL_RESULT_CHARS,
-    };
-  }
-
-  const budgetChars = resolveToolResultBudget(toolName, budget);
-
-  // Calculate total text size
-  let totalTextChars = 0;
-  for (const block of content) {
-    if (block && typeof block === "object" && (block as { type?: string }).type === "text") {
-      const text = (block as TextContent).text;
-      if (typeof text === "string") {
-        totalTextChars += text.length;
-      }
-    }
-  }
-
-  if (totalTextChars <= budgetChars) {
-    return {
-      message: msg,
-      truncated: false,
-      originalChars: totalTextChars,
-      includedChars: totalTextChars,
-      budgetChars,
-    };
-  }
-
-  // Truncate proportionally
-  let includedChars = 0;
-  let didTruncate = false;
-  const newContent = content.map((block: unknown) => {
-    if (!block || typeof block !== "object" || (block as { type?: string }).type !== "text") {
-      return block;
-    }
-    const textBlock = block as TextContent;
-    if (typeof textBlock.text !== "string") {
-      return block;
-    }
-    const blockShare = textBlock.text.length / totalTextChars;
-    const blockBudget = Math.max(128, Math.floor(budgetChars * blockShare));
-    const nextText = truncateHeadTail(textBlock.text, blockBudget);
-    if (nextText.length < textBlock.text.length) {
-      didTruncate = true;
-    }
-    includedChars += nextText.length;
-    return {
-      ...textBlock,
-      text: nextText,
-    };
+  return truncateToolResultMessage(msg, HARD_MAX_TOOL_RESULT_CHARS, {
+    suffix: GUARD_TRUNCATION_SUFFIX,
+    minKeepChars: 2_000,
   });
-
-  return {
-    message: { ...msg, content: newContent } as AgentMessage,
-    truncated: didTruncate,
-    originalChars: totalTextChars,
-    includedChars: includedChars || budgetChars,
-    budgetChars,
-  };
-}
-
-type ToolCall = { id: string; name?: string };
-
-function extractAssistantToolCalls(msg: Extract<AgentMessage, { role: "assistant" }>): ToolCall[] {
-  const content = msg.content;
-  if (!Array.isArray(content)) {
-    return [];
-  }
-
-  const toolCalls: ToolCall[] = [];
-  for (const block of content) {
-    if (!block || typeof block !== "object") {
-      continue;
-    }
-    const rec = block as { type?: unknown; id?: unknown; name?: unknown };
-    if (typeof rec.id !== "string" || !rec.id) {
-      continue;
-    }
-    if (rec.type === "toolCall" || rec.type === "toolUse" || rec.type === "functionCall") {
-      toolCalls.push({
-        id: rec.id,
-        name: typeof rec.name === "string" ? rec.name : undefined,
-      });
-    }
-  }
-  return toolCalls;
-}
-
-function extractToolResultId(msg: Extract<AgentMessage, { role: "toolResult" }>): string | null {
-  const toolCallId = (msg as { toolCallId?: unknown }).toolCallId;
-  if (typeof toolCallId === "string" && toolCallId) {
-    return toolCallId;
-  }
-  const toolUseId = (msg as { toolUseId?: unknown }).toolUseId;
-  if (typeof toolUseId === "string" && toolUseId) {
-    return toolUseId;
-  }
-  return null;
 }
 
 export function installSessionToolResultGuard(
   sessionManager: SessionManager,
   opts?: {
+    /**
+     * Optional transform applied to any message before persistence.
+     */
+    transformMessageForPersistence?: (message: AgentMessage) => AgentMessage;
     /**
      * Optional, synchronous transform applied to toolResult messages *before* they are
      * persisted to the session transcript.
@@ -198,15 +51,19 @@ export function installSessionToolResultGuard(
      * Defaults to true.
      */
     allowSyntheticToolResults?: boolean;
-    /** Optional tool-specific char budgets for persisted tool results. */
-    toolOutputBudget?: ToolOutputBudget;
-    /** Optional callback for tool-output truncation telemetry. */
-    onToolResultTruncated?: (event: {
-      toolName?: string;
-      originalChars: number;
-      includedChars: number;
-      budgetChars: number;
-    }) => void;
+    /**
+     * Optional set/list of tool names accepted for assistant toolCall/toolUse blocks.
+     * When set, tool calls with unknown names are dropped before persistence.
+     */
+    allowedToolNames?: Iterable<string>;
+    /**
+     * Synchronous hook invoked before any message is written to the session JSONL.
+     * If the hook returns { block: true }, the message is silently dropped.
+     * If it returns { message }, the modified message is written instead.
+     */
+    beforeMessageWriteHook?: (
+      event: PluginHookBeforeMessageWriteEvent,
+    ) => PluginHookBeforeMessageWriteResult | undefined;
   },
 ): {
   flushPendingToolResults: () => void;
@@ -214,6 +71,10 @@ export function installSessionToolResultGuard(
 } {
   const originalAppend = sessionManager.appendMessage.bind(sessionManager);
   const pending = new Map<string, string | undefined>();
+  const persistMessage = (message: AgentMessage) => {
+    const transformer = opts?.transformMessageForPersistence;
+    return transformer ? transformer(message) : message;
+  };
 
   const persistToolResult = (
     message: AgentMessage,
@@ -224,6 +85,25 @@ export function installSessionToolResultGuard(
   };
 
   const allowSyntheticToolResults = opts?.allowSyntheticToolResults ?? true;
+  const beforeWrite = opts?.beforeMessageWriteHook;
+
+  /**
+   * Run the before_message_write hook. Returns the (possibly modified) message,
+   * or null if the message should be blocked.
+   */
+  const applyBeforeWriteHook = (msg: AgentMessage): AgentMessage | null => {
+    if (!beforeWrite) {
+      return msg;
+    }
+    const result = beforeWrite({ message: msg });
+    if (result?.block) {
+      return null;
+    }
+    if (result?.message) {
+      return result.message;
+    }
+    return msg;
+  };
 
   const flushPendingToolResults = () => {
     if (pending.size === 0) {
@@ -232,13 +112,16 @@ export function installSessionToolResultGuard(
     if (allowSyntheticToolResults) {
       for (const [id, name] of pending.entries()) {
         const synthetic = makeMissingToolResult({ toolCallId: id, toolName: name });
-        originalAppend(
-          persistToolResult(synthetic, {
+        const flushed = applyBeforeWriteHook(
+          persistToolResult(persistMessage(synthetic), {
             toolCallId: id,
             toolName: name,
             isSynthetic: true,
-          }) as never,
+          }),
         );
+        if (flushed) {
+          originalAppend(flushed as never);
+        }
       }
     }
     pending.clear();
@@ -248,7 +131,9 @@ export function installSessionToolResultGuard(
     let nextMessage = message;
     const role = (message as { role?: unknown }).role;
     if (role === "assistant") {
-      const sanitized = sanitizeToolCallInputs([message]);
+      const sanitized = sanitizeToolCallInputs([message], {
+        allowedToolNames: opts?.allowedToolNames,
+      });
       if (sanitized.length === 0) {
         if (allowSyntheticToolResults && pending.size > 0) {
           flushPendingToolResults();
@@ -267,27 +152,30 @@ export function installSessionToolResultGuard(
       }
       // Apply hard size cap before persistence to prevent oversized tool results
       // from consuming the entire context window on subsequent LLM calls.
-      const capped = capToolResultSize(nextMessage, toolName, opts?.toolOutputBudget);
-      if (capped.truncated) {
-        opts?.onToolResultTruncated?.({
-          toolName,
-          originalChars: capped.originalChars,
-          includedChars: capped.includedChars,
-          budgetChars: capped.budgetChars,
-        });
-      }
-      return originalAppend(
-        persistToolResult(capped.message, {
+      const capped = capToolResultSize(persistMessage(nextMessage));
+      const persisted = applyBeforeWriteHook(
+        persistToolResult(capped, {
           toolCallId: id ?? undefined,
           toolName,
           isSynthetic: false,
-        }) as never,
+        }),
       );
+      if (!persisted) {
+        return undefined;
+      }
+      return originalAppend(persisted as never);
     }
 
+    // Skip tool call extraction for aborted/errored assistant messages.
+    // When stopReason is "error" or "aborted", the tool_use blocks may be incomplete
+    // and should not have synthetic tool_results created. Creating synthetic results
+    // for incomplete tool calls causes API 400 errors:
+    // "unexpected tool_use_id found in tool_result blocks"
+    // This matches the behavior in repairToolUseResultPairing (session-transcript-repair.ts)
+    const stopReason = (nextMessage as { stopReason?: string }).stopReason;
     const toolCalls =
-      nextRole === "assistant"
-        ? extractAssistantToolCalls(nextMessage as Extract<AgentMessage, { role: "assistant" }>)
+      nextRole === "assistant" && stopReason !== "aborted" && stopReason !== "error"
+        ? extractToolCallsFromAssistant(nextMessage as Extract<AgentMessage, { role: "assistant" }>)
         : [];
 
     if (allowSyntheticToolResults) {
@@ -301,7 +189,11 @@ export function installSessionToolResultGuard(
       }
     }
 
-    const result = originalAppend(nextMessage as never);
+    const finalMessage = applyBeforeWriteHook(persistMessage(nextMessage));
+    if (!finalMessage) {
+      return undefined;
+    }
+    const result = originalAppend(finalMessage as never);
 
     const sessionFile = (
       sessionManager as { getSessionFile?: () => string | null }
